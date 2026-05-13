@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p cloudflare/.generated
-          workers="1"
+          workers="4"
           batch_size="3"
           page_delay="8"
           album_delay="3"

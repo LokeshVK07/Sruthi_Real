@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p cloudflare/.generated "${TELUGU_DATA_DIR}" "${TELUGU_MEDIA_DIR}" "${TELUGU_CACHE_DIR}"
-          workers="1"
+          workers="4"
           batch_size="3"
           page_delay="8"
           album_delay="3"
