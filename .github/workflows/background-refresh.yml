@@ -81,10 +81,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p cloudflare/.generated
-          workers="4"
-          batch_size="3"
-          page_delay="8"
-          album_delay="3"
+          workers="$(python - <<'PY'
+          import os
+          print(max(4, os.cpu_count() or 4))
+          PY
+          )"
+          batch_size="$(( workers * 4 ))"
+          page_delay="1"
+          album_delay="1"
           retry_count="5"
           retry_base_delay="8"
           stop_after_known_pages="4"
