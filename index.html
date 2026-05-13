@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sruthi - ஷ்ருதி</title>
+    <meta
+      name="description"
+      content="Tamil Music Vault"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/jpeg" href="./Sruthi_kutty.jpg" />
+    <link rel="apple-touch-icon" href="./Sruthi_kutty.jpg" />
+    <link rel="stylesheet" href="./styles-new.css?v=22" />
+  </head>
+  <body>
+    <button id="mobile-menu-toggle" class="mobile-menu-button" type="button" aria-label="Open library menu" aria-expanded="false">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+    <div id="mobile-menu-backdrop" class="mobile-menu-backdrop" hidden></div>
+    <div id="queue-backdrop" class="queue-backdrop" hidden></div>
+    <div class="app-shell">
+      <aside class="side-rail" id="side-rail">
+        <div class="brand-block">
+          <p class="kicker">Tamil Music Vault</p>
+          <h1>Sruthi - ஷ்ருதி</h1>
+          <p class="brand-copy">
+            A warm, classic listening room for a deep Tamil song library.
+          </p>
+        </div>
+
+        <div class="stats-panel">
+          <div class="stat-card">
+            <span>Albums</span>
+            <strong id="album-count">0</strong>
+          </div>
+          <div class="stat-card">
+            <span>Tracks</span>
+            <strong id="track-count">0</strong>
+          </div>
+        </div>
+
+        <button id="refresh-library" class="rail-button" type="button">
+          Refresh Library
+        </button>
+
+        <button id="show-all-rail" class="rail-button secondary-rail-button hidden" type="button">
+          All Songs
+        </button>
+
+        <section id="favorites-card" class="favorites-card library-collection-card">
+          <div class="favorites-head">
+            <div>
+              <p class="kicker">Library</p>
+              <h2>Favourites</h2>
+            </div>
+            <div class="favorites-tools">
+              <strong id="favorite-count">0</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="playlists-card">
+          <div class="favorites-head">
+            <div>
+              <p class="kicker">Curate</p>
+              <h2>Playlists</h2>
+            </div>
+            <strong id="playlist-count">0</strong>
+          </div>
+          <form id="playlist-form" class="playlist-form">
+            <input id="playlist-input" type="text" maxlength="40" placeholder="Create playlist" />
+            <button id="playlist-create" type="submit">Add</button>
+          </form>
+          <div id="playlist-list" class="playlist-list" aria-live="polite"></div>
+        </section>
+
+      </aside>
+
+      <main class="library-stage">
+        <header class="mobile-app-bar" aria-label="App header">
+          <div>
+            <p class="kicker">Tamil Music Vault</p>
+            <h2>Sruthi - ஷ்ருதி</h2>
+          </div>
+        </header>
+
+        <section class="player-bar">
+          <button id="mobile-player-minimize" class="mobile-player-minimize" type="button" aria-label="Minimize player">
+            <span class="mobile-player-handle" aria-hidden="true"></span>
+          </button>
+          <div class="player-bar-main">
+            <div class="player-avatar-wrap" aria-hidden="true">
+              <img id="player-avatar" class="player-avatar" src="./Sruthi_kutty.jpg" alt="" />
+            </div>
+
+            <div class="player-copy">
+              <p class="kicker">Now Playing</p>
+              <h3 id="now-title">Choose a song</h3>
+              <p id="now-artist">Select a track from the library.</p>
+            </div>
+
+            <dl class="player-meta">
+              <div>
+                <dt>Movie</dt>
+                <dd>
+                  <button id="now-movie" class="meta-link-button" type="button" disabled>-</button>
+                </dd>
+              </div>
+              <div>
+                <dt>Year</dt>
+                <dd id="now-year">-</dd>
+              </div>
+              <div>
+                <dt>Composer</dt>
+                <dd id="now-composer">-</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="player-transport">
+            <div class="player-actions">
+              <button id="previous-track" class="transport-button" type="button">Prev</button>
+              <button id="play-toggle" class="play-toggle" type="button">Play</button>
+              <button id="next-track" class="transport-button" type="button">Next</button>
+            </div>
+
+            <div class="player-options">
+              <button id="mobile-mode-toggle" class="transport-button option-icon-button mobile-only-control" type="button" aria-label="Playback mode" title="Playback mode">↻</button>
+              <label class="mode-wrap" for="playback-mode">
+                <span class="sr-only">Playback mode</span>
+                <select id="playback-mode">
+                  <option value="normal">Normal</option>
+                  <option value="shuffle">Shuffle</option>
+                  <option value="repeat">Repeat</option>
+                  <option value="loop">Loop One</option>
+                </select>
+              </label>
+              <button id="favorite-toggle" class="transport-button heart-button option-icon-button" type="button" aria-pressed="false" title="Add to favourites">♡</button>
+              <label class="speed-wrap" for="speed-select">
+                <span class="sr-only">Playback speed</span>
+                <select id="speed-select">
+                  <option value="0.75">0.75x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
+              </label>
+              <button id="mobile-speed-toggle" class="transport-button option-icon-button mobile-only-control" type="button" aria-label="Playback speed" title="Playback speed">1x</button>
+              <button id="queue-toggle" class="transport-button queue-button option-icon-button" type="button" aria-expanded="false" aria-label="Show queue" title="Show queue">☰</button>
+
+            </div>
+
+            <label class="mobile-player-playlist-wrap" for="mobile-player-playlist">
+              <span class="sr-only">Add current song to playlist</span>
+              <select id="mobile-player-playlist">
+                <option value="">Add to playlist</option>
+              </select>
+            </label>
+
+            <div class="transport-right">
+              <div class="seek-shell">
+                <span id="current-time" class="time-stamp">0:00</span>
+                <input id="seek-bar" class="seek-bar" type="range" min="0" max="100" value="0" step="0.1" aria-label="Seek playback" />
+                <span id="duration-time" class="time-stamp">0:00</span>
+              </div>
+  
+              <div class="player-utility">
+                <label class="volume-wrap" for="volume-control">
+                  <span class="volume-icon" aria-hidden="true">🔊</span>
+                  <span class="volume-label">Volume</span>
+                  <span class="sr-only">Adjust volume</span>
+                  <input
+                    id="volume-control"
+                    class="volume-bar"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="85"
+                    step="1"
+                    aria-label="Volume"
+                  />
+                  <span id="volume-value" class="volume-value">85%</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <audio id="audio-player" preload="auto" playsinline webkit-playsinline="true"></audio>
+          <p id="playback-status" class="playback-status"></p>
+        </section>
+
+        <section class="toolbar-card">
+          <label class="search-wrap" for="search-input">
+            <span class="sr-only">Search songs</span>
+            <input
+              id="search-input"
+              type="search"
+              placeholder="Search songs, albums, artists..."
+            />
+          </label>
+
+          <label class="select-wrap">
+            <span class="sr-only">Filter by decade</span>
+            <select id="decade-filter">
+              <option value="all">All decades</option>
+            </select>
+          </label>
+
+          <label class="toggle-wrap" for="local-songs">
+            <input id="local-songs" type="checkbox" />
+            <span>Local Songs</span>
+          </label>
+        </section>
+
+        <section class="catalog-card">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">Library</p>
+              <h2 id="collection-title">Song Collection</h2>
+              <p id="collection-description" class="collection-description hidden"></p>
+            </div>
+            <div class="panel-tools">
+              <div id="collection-actions" class="collection-actions hidden">
+                <button id="collection-play-all" class="shortcut-key" type="button">Play All</button>
+                <button id="collection-shuffle" class="shortcut-key" type="button">Shuffle</button>
+              </div>
+              <label id="collection-sort-wrap" class="favorites-sort-wrap hidden" for="favorite-sort-body">
+                <span class="sr-only">Sort favourites</span>
+                <select id="favorite-sort-body">
+                  <option value="manual">Manual</option>
+                  <option value="recent">Recent</option>
+                  <option value="title">Title</option>
+                  <option value="composer">Composer</option>
+                </select>
+              </label>
+              <strong id="result-count">0 songs</strong>
+            </div>
+          </div>
+
+          <div id="song-list" class="song-list" aria-live="polite"></div>
+          <button id="load-more" class="load-more-button" type="button" hidden>
+            Load More
+          </button>
+        </section>
+
+        <div id="mobile-mini-player" class="mobile-mini-player" hidden>
+          <button id="mobile-mini-open" class="mobile-mini-main" type="button" aria-label="Open player">
+            <div class="mobile-mini-art" aria-hidden="true">
+              <img id="mobile-mini-art-image" src="./Sruthi_kutty.jpg" alt="" />
+            </div>
+            <div class="mobile-mini-copy">
+              <strong id="mobile-mini-title">Choose a song</strong>
+              <span id="mobile-mini-artist">Select a track from the library.</span>
+            </div>
+          </button>
+          <button id="mobile-mini-toggle" class="mobile-mini-toggle" type="button" aria-label="Play">▶</button>
+          <div class="mobile-mini-progress" aria-hidden="true">
+            <span id="mobile-mini-progress-bar"></span>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <template id="song-item-template">
+      <div class="song-row">
+        <button class="song-main" type="button">
+          <div class="song-core">
+            <p class="song-title"></p>
+            <p class="song-detail"></p>
+            <p class="song-subdetail"></p>
+          </div>
+        </button>
+        <div class="song-side">
+          <div class="song-meta">
+            <span class="song-year"></span>
+          </div>
+          <div class="song-actions">
+            <label class="playlist-pick-wrap">
+              <span class="sr-only">Add to playlist</span>
+              <select class="playlist-pick">
+                <option value="">Add to playlist</option>
+              </select>
+            </label>
+            <button class="song-menu-toggle" type="button" aria-label="Song actions" title="Song actions">⋯</button>
+            <button class="song-remove hidden" type="button">Remove</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template id="playlist-item-template">
+      <div class="playlist-row">
+        <button class="playlist-main" type="button">
+          <p class="playlist-title"></p>
+          <p class="playlist-detail"></p>
+        </button>
+        <button class="playlist-remove" type="button" aria-label="Delete playlist">×</button>
+      </div>
+    </template>
+
+    <div id="queue-panel" class="queue-panel" hidden>
+      <div class="queue-panel-head">
+        <strong>Up Next</strong>
+        <div class="queue-panel-tools">
+          <button id="queue-clear" class="shortcut-key" type="button" aria-label="Clear queue" style="font-size: 0.72rem; display: none;">Clear</button>
+          <span id="queue-count">0</span>
+          <button id="queue-close" class="queue-close" type="button" aria-label="Close queue">×</button>
+        </div>
+      </div>
+      <div id="queue-now-playing" class="queue-list" style="margin-bottom: 2px;"></div>
+      <div id="queue-list" class="queue-list"></div>
+    </div>
+
+    <div id="song-context-menu" class="song-context-menu hidden" role="menu" aria-hidden="true">
+      <button type="button" data-action="favorite">
+        <span class="song-context-icon" aria-hidden="true">♡</span>
+        <span class="song-context-label">Favourites</span>
+      </button>
+      <button type="button" data-action="queue">
+        <span class="song-context-icon" aria-hidden="true">☰</span>
+        <span class="song-context-label">Queue</span>
+      </button>
+    </div>
+
+    <div id="app-toast" class="app-toast hidden" aria-live="polite" aria-atomic="true"></div>
+
+    <div id="shortcuts-modal" class="shortcuts-modal" hidden>
+      <div class="shortcuts-content">
+        <div class="shortcuts-head">
+          <h2>Keyboard Shortcuts</h2>
+          <button class="shortcuts-close" type="button" aria-label="Close shortcuts" onclick="document.getElementById('shortcuts-modal').hidden = true;">×</button>
+        </div>
+        <div class="shortcuts-grid">
+          <div class="shortcuts-section">
+            <h3>Playback</h3>
+            <div class="shortcut-row"><span>Play / Pause</span><span class="shortcut-key">Space / K</span></div>
+            <div class="shortcut-row"><span>Next Track</span><span class="shortcut-key">→ / N</span></div>
+            <div class="shortcut-row"><span>Previous Track</span><span class="shortcut-key">← / P</span></div>
+            <div class="shortcut-row"><span>Seek Back 10s</span><span class="shortcut-key">J</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>Volume & Options</h3>
+            <div class="shortcut-row"><span>Volume Up</span><span class="shortcut-key">↑</span></div>
+            <div class="shortcut-row"><span>Volume Down</span><span class="shortcut-key">↓</span></div>
+            <div class="shortcut-row"><span>Mute</span><span class="shortcut-key">M</span></div>
+            <div class="shortcut-row"><span>Shuffle Toggle</span><span class="shortcut-key">S</span></div>
+            <div class="shortcut-row"><span>Repeat Toggle</span><span class="shortcut-key">R</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>Navigation</h3>
+            <div class="shortcut-row"><span>Like / Favorite</span><span class="shortcut-key">L</span></div>
+            <div class="shortcut-row"><span>Fullscreen</span><span class="shortcut-key">F</span></div>
+            <div class="shortcut-row"><span>Focus Search</span><span class="shortcut-key">/</span></div>
+            <div class="shortcut-row"><span>Toggle Queue</span><span class="shortcut-key">Q</span></div>
+            <div class="shortcut-row"><span>Close Panels</span><span class="shortcut-key">Esc</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="./app-new.js?v=24"></script>
+  </body>
+</html>

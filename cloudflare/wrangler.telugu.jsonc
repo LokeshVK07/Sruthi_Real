@@ -1,0 +1,19 @@
+{
+  "name": "sruthi-telugu",
+  "compatibility_date": "2026-04-08",
+  "main": "src/worker.js",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "CATALOG_LANGUAGE": "telugu"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sruthi-telugu-db",
+      "database_id": "REPLACE_WITH_TELUGU_D1_DB_ID"
+    }
+  ]
+}
