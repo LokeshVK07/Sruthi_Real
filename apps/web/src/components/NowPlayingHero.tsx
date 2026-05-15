@@ -1,4 +1,4 @@
-import { Heart, MoreHorizontal, Pause, Play, Repeat, Shuffle, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
+import { Heart, Keyboard, MoreHorizontal, Pause, Play, Repeat, Shuffle, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import type { Song } from "../types";
 import type { RepeatMode } from "../store";
@@ -34,6 +34,7 @@ type NowPlayingHeroProps = {
   onAddToPlaylist: (playlistId: string) => void;
   onAddToQueue: () => void;
   onViewAlbum: () => void;
+  onOpenShortcuts: () => void;
   onShare: () => void;
 };
 
@@ -114,6 +115,7 @@ export default function NowPlayingHero({
   onAddToPlaylist,
   onAddToQueue,
   onViewAlbum,
+  onOpenShortcuts,
   onShare
 }: NowPlayingHeroProps) {
   const titleText = song?.title ?? "Pick a song to start";
@@ -188,6 +190,10 @@ export default function NowPlayingHero({
                   </div>
                   <button onClick={onAddToQueue}>Add to queue</button>
                   <button onClick={onViewAlbum}>View album</button>
+                  <button onClick={onOpenShortcuts}>
+                    Keyboard shortcuts
+                    <Keyboard size={13} />
+                  </button>
                   <button onClick={onShare}>Share</button>
                 </div>
               ) : null}

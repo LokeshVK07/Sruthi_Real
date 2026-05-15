@@ -397,6 +397,10 @@ img {
   position: relative;
 }
 
+.app-shell.is-queue-hidden {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+
 .hero-card {
   position: relative;
   min-height: var(--hero-min-height);
@@ -1108,6 +1112,10 @@ img {
   gap: 10px;
 }
 
+.playlist-grid--home {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
 .artist-card,
 .playlist-card {
   min-height: 92px;
@@ -1116,6 +1124,80 @@ img {
   background: rgba(255, 255, 255, 0.04);
   text-align: left;
   font-size: var(--font-sm);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.playlist-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playlist-card__main {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+}
+
+.playlist-card__cover {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, rgba(216, 92, 255, 0.9), rgba(255, 102, 216, 0.78));
+  color: white;
+  font-weight: 800;
+}
+
+.playlist-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.playlist-card__cover--empty {
+  box-shadow: 0 14px 30px rgba(216, 92, 255, 0.18);
+}
+
+.playlist-card__actions,
+.section-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playlist-card__actions {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.playlist-card__actions button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-soft);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.playlist-card__actions button:hover {
+  color: var(--text);
+  background: rgba(216, 92, 255, 0.14);
+}
+
+.section-link--danger {
+  color: #ff8bab;
 }
 
 .artist-card span:first-child {

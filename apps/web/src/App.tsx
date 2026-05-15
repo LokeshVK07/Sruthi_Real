@@ -10,9 +10,11 @@ import SearchFilterBar from "./components/SearchFilterBar";
 import RecentlyPlayed from "./components/RecentlyPlayed";
 import QueuePanel from "./components/QueuePanel";
 import PlaylistModal from "./components/PlaylistModal";
+import KeyboardShortcutsModal from "./components/KeyboardShortcutsModal";
 import MobileLayout from "./components/mobile/MobileLayout";
 import type { MobileLibrarySection } from "./components/mobile/MobileLayout";
 import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
 import { fallbackArt, heroArtworkFor, imageForAlbum, imageForSong, replaceBrokenArtwork } from "./utils/artwork";
@@ -28,6 +30,13 @@ type UiPlaylist = {
   id: string;
   name: string;
   trackIds: string[];
+};
+type HomePlaylistCard = {
+  id: string;
+  name: string;
+  count: number;
+  coverUrl: string | null;
+  kind: "favorites" | "playlist";
 };
 
 type StoredPlaylistShape = {
@@ -134,6 +143,8 @@ export default function App() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+  const [desktopQueueOpen, setDesktopQueueOpen] = useState(true);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [customPlaylists, setCustomPlaylists] = useState<UiPlaylist[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -158,6 +169,7 @@ export default function App() {
   const [selectedComposerSlug, setSelectedComposerSlug] = useState<string | null>(null);
   const [playlistTargetTrack, setPlaylistTargetTrack] = useState<Song | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const queueHydratedRef = useRef(false);
   // Debounced version of `searchQuery` for the heavy work (filtering 28k+
   // songs, hitting /api/search). The visible <input> stays bound to
@@ -301,6 +313,31 @@ export default function App() {
     () => customPlaylists.map((playlist) => ({ id: playlist.id, name: playlist.name, count: playlist.trackIds.length })),
     [customPlaylists]
   );
+  const homePlaylistCards = useMemo<HomePlaylistCard[]>(() => {
+    const cards: HomePlaylistCard[] = [
+      {
+        id: "favorites",
+        name: "Favorites",
+        count: favoriteSongs.length,
+        coverUrl: favoriteSongs[0] ? imageForSong(favoriteSongs[0]) : null,
+        kind: "favorites",
+      },
+    ];
+
+    for (const playlist of customPlaylists) {
+      const firstSong = playlist.trackIds.map((trackId) => songLookup.get(trackId)).find(Boolean) ?? null;
+      cards.push({
+        id: playlist.id,
+        name: playlist.name,
+        count: playlist.trackIds.length,
+        coverUrl: firstSong ? imageForSong(firstSong) : null,
+        kind: "playlist",
+      });
+    }
+
+    return cards;
+  }, [customPlaylists, favoriteSongs, songLookup]);
+  const homeComposerCards = useMemo(() => (composersData?.items ?? []).slice(0, 8), [composersData?.items]);
 
   const getDeck = (index: number) => (index === 0 ? deckARef.current : deckBRef.current);
   const getActiveDeck = () => getDeck(activeDeckIndex);
@@ -889,6 +926,7 @@ export default function App() {
   const desktopSearchBar = useMemo(
     () => (
       <SearchFilterBar
+        inputRef={searchInputRef}
         query={searchQuery}
         selectedFilter={selectedFilter}
         viewMode={viewMode}
@@ -958,6 +996,28 @@ export default function App() {
     }
     lastVolumeRef.current = volume;
     setIsMuted(true);
+  }
+
+  function seekTo(value: number) {
+    const safeDurationValue = duration || currentSong?.durationSeconds || 0;
+    const nextTime = Math.max(0, safeDurationValue ? Math.min(value, safeDurationValue) : value);
+    setCurrentTime(nextTime);
+    const activeDeck = getActiveDeck();
+    if (activeDeck) activeDeck.currentTime = nextTime;
+  }
+
+  function seekBy(seconds: number) {
+    seekTo(currentTime + seconds);
+  }
+
+  function seekToPercent(percent: number) {
+    const safeDurationValue = duration || currentSong?.durationSeconds || 0;
+    if (!safeDurationValue) return;
+    seekTo(safeDurationValue * percent);
+  }
+
+  function setVolumeByDelta(delta: number) {
+    handleVolumeChange(Math.max(0, Math.min(1, volume + delta)));
   }
 
   function handleVolumeChange(nextVolume: number) {
@@ -1158,6 +1218,109 @@ export default function App() {
     setMobileAddToPlaylistOpen(true);
   }
 
+  function focusSearchInput() {
+    setActiveNav("search");
+    setMobileTab("search");
+    setMobileSearchOpen(true);
+    window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+  }
+
+  function navigateDesktop(nav: NavKey) {
+    if (nav === "home") {
+      resetHomeView();
+      return;
+    }
+    setExpandedSection(null);
+    setSelectedAlbumId(null);
+    setSelectedPlaylistId(null);
+    setSelectedArtistName(null);
+    if (nav !== "artists") setSelectedComposerSlug(null);
+    setSelectedFilter("all");
+    setActiveNav(nav);
+    setMobileTab(nav === "search" ? "search" : "library");
+    if (nav === "search") setMobileSearchOpen(true);
+    if (nav === "library") setMobileLibrarySection("favorites");
+    if (nav === "playlists") setMobileLibrarySection("playlists");
+    if (nav === "artists") setMobileLibrarySection("artists");
+  }
+
+  function closeTransientUi() {
+    if (shortcutModalOpen) {
+      setShortcutModalOpen(false);
+      return;
+    }
+    setHeroMenuOpen(false);
+    setFilterOpen(false);
+    setPlaylistModalOpen(false);
+    setMobileFullPlayerOpen(false);
+    setMobileQueueOpen(false);
+    setMobileAddToPlaylistOpen(false);
+    setMobileCreatePlaylistOpen(false);
+    setMobileRefreshOpen(false);
+    setMobileSearchOpen(false);
+    setMobileSidebarOpen(false);
+  }
+
+  function openAddCurrentToPlaylistPicker() {
+    if (!currentSong) return;
+    setPlaylistTargetTrack(currentSong);
+    if (isMobileViewport) {
+      setMobileAddToPlaylistOpen(true);
+      return;
+    }
+    setHeroMenuOpen(true);
+    setHeroFeedback("Choose a playlist from the More menu");
+  }
+
+  function openCreatePlaylistFromShortcut() {
+    setPlaylistTargetTrack(currentSong ?? null);
+    if (isMobileViewport) {
+      setMobileCreatePlaylistOpen(true);
+      return;
+    }
+    setPlaylistModalOpen(true);
+  }
+
+  function addCurrentSongToQueue() {
+    if (!currentSong) return;
+    addToQueue(currentSong);
+    setHeroFeedback("Added to queue");
+  }
+
+  useKeyboardShortcuts({
+    enabled: true,
+    isShortcutModalOpen: shortcutModalOpen,
+    openShortcuts: () => setShortcutModalOpen(true),
+    closeModals: closeTransientUi,
+    togglePlayPause: handlePlayPauseToggle,
+    playNext: handleNextTrack,
+    playPrevious: handlePreviousTrack,
+    seekBy,
+    seekToPercent,
+    setVolumeByDelta,
+    toggleMute: handleToggleMute,
+    toggleShuffle,
+    cycleRepeat: cycleRepeatMode,
+    toggleFavoriteCurrent: () => currentSong && toggleFavorite.mutate(currentSong.id),
+    focusSearch: focusSearchInput,
+    navigateHome: resetHomeView,
+    navigateSearch: focusSearchInput,
+    navigateLibrary: () => navigateDesktop("library"),
+    navigatePlaylists: () => navigateDesktop("playlists"),
+    navigateArtists: () => navigateDesktop("artists"),
+    toggleQueue: () => {
+      if (isMobileViewport) setMobileQueueOpen((open) => !open);
+      else setDesktopQueueOpen((open) => !open);
+    },
+    openAddToPlaylist: openAddCurrentToPlaylistPicker,
+    openCreatePlaylist: openCreatePlaylistFromShortcut,
+    addCurrentToQueue: addCurrentSongToQueue,
+    toggleFullPlayer: () => setMobileFullPlayerOpen((open) => !open),
+    openMoreOptions: () => setHeroMenuOpen((open) => !open),
+  });
+
   const centerResults = useMemo(() => {
     if (expandedSection === "favorites") {
       return (
@@ -1244,6 +1407,86 @@ export default function App() {
             onPrefetchTrack={(song) => requestSongPrefetch([song.id])}
             onViewAll={() => setExpandedSection("recent")}
           />
+          <section className="content-section">
+            <div className="section-header">
+              <h2>Playlists</h2>
+              <div className="section-header__actions">
+                <button className="section-link" type="button" onClick={() => setPlaylistModalOpen(true)}>
+                  + New Playlist
+                </button>
+                <button className="section-link" type="button" onClick={() => navigateDesktop("playlists")}>
+                  View all
+                </button>
+              </div>
+            </div>
+            <div className="playlist-grid playlist-grid--home">
+              {homePlaylistCards.map((playlist) => (
+                <div key={playlist.id} className={playlist.kind === "favorites" ? "playlist-card playlist-card--favorites" : "playlist-card"}>
+                  <button
+                    type="button"
+                    className="playlist-card__main"
+                    onClick={() => {
+                      if (playlist.kind === "favorites") {
+                        setActiveNav("favorites");
+                        setExpandedSection("favorites");
+                      } else {
+                        handleOpenPlaylistView(playlist.id);
+                      }
+                    }}
+                  >
+                    <span className={playlist.coverUrl ? "playlist-card__cover" : "playlist-card__cover playlist-card__cover--empty"}>
+                      {playlist.coverUrl ? <img src={playlist.coverUrl} alt="" loading="lazy" decoding="async" onError={replaceBrokenArtwork} /> : "♪"}
+                    </span>
+                    <strong>{playlist.name}</strong>
+                    <span>{playlist.count} songs</span>
+                  </button>
+                  {playlist.kind === "playlist" ? (
+                    <div className="playlist-card__actions">
+                      <button type="button" onClick={() => handleRenamePlaylist(playlist.id)}>Rename</button>
+                      <button type="button" onClick={() => handleDeletePlaylist(playlist.id)}>Delete</button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </section>
+          {homeComposerCards.length ? (
+            <section className="content-section">
+              <div className="section-header">
+                <h2>Top composers</h2>
+                <button className="section-link" type="button" onClick={() => navigateDesktop("artists")}>
+                  View all
+                </button>
+              </div>
+              <div className="composer-grid">
+                {homeComposerCards.map((composer) => (
+                  <button
+                    key={composer.slug}
+                    className="composer-card"
+                    type="button"
+                    onClick={() => {
+                      setSelectedComposerSlug(composer.slug);
+                      setActiveNav("artists");
+                      setMobileTab("library");
+                      setMobileLibrarySection("artists");
+                    }}
+                  >
+                    <div className="composer-card__media">
+                      {composer.coverUrl ? (
+                        <img src={composer.coverUrl} alt={composer.name} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                      ) : (
+                        <span className="composer-card__monogram">{composer.name.charAt(0)}</span>
+                      )}
+                    </div>
+                    <div className="composer-card__copy">
+                      <strong title={composer.name}>{composer.name}</strong>
+                      <span>{composer.songCount} songs · {composer.albumCount} albums</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </>
       );
     }
@@ -1401,6 +1644,19 @@ export default function App() {
         <section className="content-section">
           <div className="section-header">
             <h2>{selectedPlaylist ? selectedPlaylist.name : "Playlists"}</h2>
+            {selectedPlaylist ? (
+              <div className="section-header__actions">
+                <button className="section-link" type="button" onClick={() => handleRenamePlaylist(selectedPlaylist.id)}>
+                  Rename
+                </button>
+                <button className="section-link section-link--danger" type="button" onClick={() => handleDeletePlaylist(selectedPlaylist.id)}>
+                  Delete
+                </button>
+                <button className="section-link" type="button" onClick={() => setSelectedPlaylistId(null)}>
+                  All playlists
+                </button>
+              </div>
+            ) : null}
           </div>
           {selectedPlaylist ? (
             selectedPlaylistSongs.length ? (
@@ -1428,14 +1684,20 @@ export default function App() {
           ) : (
             <div className="playlist-grid">
               {filteredPlaylists.map((playlist) => (
-                <button
+                <div
                   key={playlist.id}
                   className="playlist-card"
-                  onClick={() => handleOpenPlaylistView(playlist.id)}
                 >
-                  <strong>{playlist.name}</strong>
-                  <span>{playlist.count} songs</span>
-                </button>
+                  <button type="button" className="playlist-card__main" onClick={() => handleOpenPlaylistView(playlist.id)}>
+                    <span className="playlist-card__cover playlist-card__cover--empty">♪</span>
+                    <strong>{playlist.name}</strong>
+                    <span>{playlist.count} songs</span>
+                  </button>
+                  <div className="playlist-card__actions">
+                    <button type="button" onClick={() => handleRenamePlaylist(playlist.id)}>Rename</button>
+                    <button type="button" onClick={() => handleDeletePlaylist(playlist.id)}>Delete</button>
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -1493,6 +1755,8 @@ export default function App() {
     playlistSummaries,
     fullLibrary,
     albumItems,
+    homePlaylistCards,
+    homeComposerCards,
   ]);
 
   return (
@@ -1700,7 +1964,7 @@ export default function App() {
         </div>
       ) : (
         <div className="desktop-only">
-          <div className="app-shell">
+          <div className={desktopQueueOpen ? "app-shell" : "app-shell is-queue-hidden"}>
             {mobileSidebarOpen ? <button className="app-backdrop" onClick={() => setMobileSidebarOpen(false)} aria-label="Close sidebar" /> : null}
 
             <div className={mobileSidebarOpen ? "app-sidebar-wrap is-open" : "app-sidebar-wrap"}>
@@ -1756,6 +2020,10 @@ export default function App() {
                   setHeroMenuOpen(false);
                 }}
                 onViewAlbum={handleOpenCurrentAlbum}
+                onOpenShortcuts={() => {
+                  setShortcutModalOpen(true);
+                  setHeroMenuOpen(false);
+                }}
                 onShare={handleShareCurrentSong}
               />
 
@@ -1764,12 +2032,13 @@ export default function App() {
               {centerResults}
             </main>
 
-            {desktopQueuePanel}
+            {desktopQueueOpen ? desktopQueuePanel : null}
 
             {desktopPlaylistModal}
           </div>
         </div>
       )}
+      <KeyboardShortcutsModal open={shortcutModalOpen} onClose={() => setShortcutModalOpen(false)} />
     </>
   );
 }
