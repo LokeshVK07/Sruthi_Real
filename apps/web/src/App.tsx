@@ -264,12 +264,39 @@ export default function App() {
   const favoriteSongs = favorites?.items?.length ? favorites.items : home?.favorites ?? [];
   const albumItems = albums?.items ?? [];
   const fullLibrary = librarySongs.length ? librarySongs : home?.library ?? [];
+  const albumLookup = useMemo(() => {
+    const map = new Map<string, Album>();
+    for (const album of albumItems) map.set(album.albumId, album);
+    return map;
+  }, [albumItems]);
   const songLookup = useMemo(() => {
     const map = new Map<string, Song>();
     for (const song of fullLibrary) map.set(song.id, song);
     for (const song of favoriteSongs) if (!map.has(song.id)) map.set(song.id, song);
     return map;
   }, [fullLibrary, favoriteSongs]);
+  const withLatestSongMetadata = (song: Song | null | undefined): Song | null => {
+    if (!song) return null;
+    const latest = songLookup.get(song.id);
+    const album = albumLookup.get((latest ?? song).albumId);
+    const albumArt = imageForAlbum(album ?? null);
+    const albumArtUrl = albumArt !== fallbackArt ? albumArt : null;
+    return {
+      ...song,
+      ...(latest ?? {}),
+      artworkUrl: latest?.artworkUrl || song.artworkUrl || albumArtUrl,
+      albumArtUrl: latest?.albumArtUrl || song.albumArtUrl || albumArtUrl,
+      imageUrl: latest?.imageUrl || song.imageUrl || albumArtUrl,
+      image_url: latest?.image_url || song.image_url || albumArtUrl,
+      coverUrl: latest?.coverUrl || song.coverUrl || albumArtUrl,
+      cover_url: latest?.cover_url || song.cover_url || albumArtUrl,
+      album_art: latest?.album_art || song.album_art || albumArtUrl,
+    };
+  };
+  const enrichedQueue = useMemo(
+    () => queue.map((song) => withLatestSongMetadata(song) ?? song),
+    [queue, songLookup, albumLookup],
+  );
   const searchSongResults = useMemo(() => {
     if (!debouncedQuery) return [];
     const backendItems = searchData?.tracks ?? [];
@@ -287,10 +314,10 @@ export default function App() {
   const searchAlbumResults = useMemo(() => searchData?.albums ?? [], [searchData?.albums]);
   const searchArtistResults = useMemo(() => searchData?.artists ?? [], [searchData?.artists]);
   const searchComposerResults = useMemo(() => searchData?.composers ?? [], [searchData?.composers]);
-  const currentSong = useMemo(
-    () => queue[currentIndex] ?? pickInitialSong(fullLibrary),
-    [queue, currentIndex, fullLibrary]
-  );
+  const currentSong = useMemo(() => {
+    const queuedSong = enrichedQueue[currentIndex] ?? null;
+    return queuedSong ?? pickInitialSong(fullLibrary);
+  }, [enrichedQueue, currentIndex, fullLibrary]);
   const recentSongs = useMemo(
     () =>
       recentlyPlayed
@@ -950,15 +977,15 @@ export default function App() {
   const desktopQueuePanel = useMemo(
     () => (
       <QueuePanel
-        queue={queue}
+        queue={enrichedQueue}
         fallbackArt={fallbackArt}
         currentSongId={currentSong?.id}
-        onPlay={(song) => handleSongSelect(song, queue)}
+        onPlay={(song) => handleSongSelect(song, enrichedQueue)}
         onReorder={moveQueueItem}
         onClear={handleClearQueue}
       />
     ),
-    [queue, currentSong?.id],
+    [enrichedQueue, currentSong?.id],
   );
 
   const desktopPlaylistModal = useMemo(
@@ -1877,7 +1904,7 @@ export default function App() {
             isShuffleOn={shuffle}
             repeatMode={repeatMode}
             buffering={buffering}
-            queue={queue}
+                queue={enrichedQueue}
             favorites={favoriteSongs}
             recentlyPlayed={recentSongs}
             fullLibrary={fullLibrary}
@@ -2027,7 +2054,7 @@ export default function App() {
                 onShare={handleShareCurrentSong}
               />
 
-              {desktopSearchBar}
+              {activeNav === "home" && selectedFilter === "all" && !searchQuery.trim() ? null : desktopSearchBar}
 
               {centerResults}
             </main>
