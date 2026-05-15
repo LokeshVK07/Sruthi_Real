@@ -879,6 +879,28 @@ export default function App() {
     [albumItems, currentSong?.albumId],
   );
   const currentHeroArtwork = heroArtworkFor(currentSong, currentAlbumArtwork);
+  const selectedAlbumFallback = useMemo<AlbumDetail | null>(() => {
+    if (!selectedAlbumId) return null;
+    const album = albumLookup.get(selectedAlbumId);
+    const albumSongs = fullLibrary.filter((song) => song.albumId === selectedAlbumId);
+    if (!album && !albumSongs.length) return null;
+    const firstSong = albumSongs[0] ?? null;
+    return {
+      albumId: selectedAlbumId,
+      albumUrl: album?.albumUrl ?? selectedAlbumId,
+      name: album?.name ?? firstSong?.albumTitle ?? "Unknown album",
+      year: album?.year ?? firstSong?.year ?? null,
+      musicDirector: album?.musicDirector ?? firstSong?.composer ?? null,
+      singersSummary: album?.singersSummary ?? firstSong?.artist ?? null,
+      imageUrl: album?.imageUrl ?? firstSong?.imageUrl ?? firstSong?.artworkUrl ?? null,
+      coverUrl: album?.coverUrl ?? firstSong?.coverUrl ?? firstSong?.artworkUrl ?? null,
+      language: album?.language ?? "Tamil",
+      trackCount: album?.trackCount ?? albumSongs.length,
+      updatedAt: album?.updatedAt ?? firstSong?.updatedAt,
+      songs: albumSongs,
+    };
+  }, [selectedAlbumId, albumLookup, fullLibrary]);
+  const selectedAlbumForView = selectedAlbum ?? selectedAlbumFallback;
 
   const filteredSongs = useMemo(() => {
     const base =
@@ -1519,15 +1541,15 @@ export default function App() {
     }
 
     if (activeNav === "albums" || selectedFilter === "albums") {
-      if (selectedAlbumId && selectedAlbum) {
+      if (selectedAlbumId && selectedAlbumForView) {
         return (
           <section className="content-section">
             <div className="section-header section-header--album-detail">
               <div>
                 <span className="section-detail-label">ALBUM</span>
-                <h2>{selectedAlbum.name}</h2>
+                <h2>{selectedAlbumForView.name}</h2>
                 <span className="section-count">
-                  {selectedAlbum.musicDirector || selectedAlbum.singersSummary || "Tamil soundtrack"}
+                  {selectedAlbumForView.musicDirector || selectedAlbumForView.singersSummary || "Tamil soundtrack"}
                 </span>
               </div>
               <button className="section-link" onClick={() => setSelectedAlbumId(null)}>
@@ -1535,9 +1557,9 @@ export default function App() {
               </button>
             </div>
             <div className="track-table">
-              {selectedAlbum.songs.map((song) => (
+              {selectedAlbumForView.songs.map((song) => (
                 <div key={song.id} className="track-row">
-                  <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbum.songs)}>
+                  <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
                     <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                     <div>
                       <strong>{song.title}</strong>
@@ -1770,6 +1792,7 @@ export default function App() {
     currentSong?.id,
     selectedAlbumId,
     selectedAlbum,
+    selectedAlbumForView,
     filteredAlbums,
     selectedComposerSlug,
     composerDetail,

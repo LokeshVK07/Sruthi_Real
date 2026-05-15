@@ -452,7 +452,7 @@ img {
 .hero__cover {
   height: 100%;
   width: 100%;
-  object-fit: cover;
+  object-fit: contain;
   object-position: top center;
   background: #181326;
 }
@@ -1414,7 +1414,7 @@ img {
 }
 
 .queue-item__duration.is-empty {
-  visibility: hidden;
+  opacity: 0.55;
 }
 
 .queue-item__handle {

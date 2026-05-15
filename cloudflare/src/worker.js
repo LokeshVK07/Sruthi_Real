@@ -823,12 +823,25 @@ async function handleArtwork(url, request, env, ctx) {
   if (appleArtworkUrl) candidates.push({ url: appleArtworkUrl, referer: "https://music.apple.com/" });
 
   let upstream = null;
+  let selectedArtworkUrl = "";
   for (const candidate of candidates) {
     upstream = await fetchArtworkCandidate(candidate.url, candidate.referer);
-    if (upstream) break;
+    if (upstream) {
+      selectedArtworkUrl = candidate.url;
+      break;
+    }
   }
 
   if (!upstream) return new Response(null, { status: 404, headers: corsHeaders() });
+  if (selectedArtworkUrl && selectedArtworkUrl !== imageUrl) {
+    const albumUrl = cleanText(row?.album_url);
+    ctx?.waitUntil(
+      env.DB.prepare("UPDATE songs SET image_url = ? WHERE album_url = ?")
+        .bind(selectedArtworkUrl, albumUrl)
+        .run()
+        .catch(() => {}),
+    );
+  }
 
   const outHeaders = new Headers(corsHeaders());
   outHeaders.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");

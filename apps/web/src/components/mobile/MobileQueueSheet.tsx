@@ -15,7 +15,7 @@ type MobileQueueSheetProps = {
 };
 
 function formatTime(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return "";
+  if (!seconds || seconds <= 0) return "—:—";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${String(secs).padStart(2, "0")}`;

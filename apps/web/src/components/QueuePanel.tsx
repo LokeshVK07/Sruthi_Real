@@ -13,7 +13,7 @@ type QueuePanelProps = {
 };
 
 function formatTime(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return "";
+  if (!seconds || seconds <= 0) return "—:—";
   const value = seconds;
   const mins = Math.floor(value / 60);
   const secs = Math.floor(value % 60);
@@ -81,7 +81,7 @@ export default function QueuePanel({ queue, fallbackArt, currentSongId, onPlay, 
                   <span title={song.artist}>{song.artist}</span>
                 </div>
               </button>
-              <span className={formatTime(song.durationSeconds) ? "queue-item__duration" : "queue-item__duration is-empty"}>
+              <span className={song.durationSeconds && song.durationSeconds > 0 ? "queue-item__duration" : "queue-item__duration is-empty"}>
                 {formatTime(song.durationSeconds)}
               </span>
               <button
