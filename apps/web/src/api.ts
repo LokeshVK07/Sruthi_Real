@@ -124,15 +124,16 @@ function normalizeSong(song: LegacySong, favorites: Set<string>): Song {
   const audioUrl = absoluteStreamUrl(song.audioUrl || "");
   const artworkSong = normalizeArtworkSong(song);
   const directArtwork = artworkSong.artworkUrl;
+  const proxiedArtwork = artworkUrlForSong(song.id, song.lastRefreshedAt);
   return {
     id: song.id,
     title: song.title || "Unknown track",
     artist: song.artist || song.singers || song.composer || "Unknown artist",
     albumTitle,
     albumId,
-    artworkUrl: directArtwork || artworkUrlForSong(song.id, song.lastRefreshedAt),
+    artworkUrl: proxiedArtwork,
     albumArtUrl: song.albumArtUrl || song.imageUrl || song.image_url || null,
-    imageUrl: artworkSong.imageUrl || null,
+    imageUrl: directArtwork || null,
     image_url: song.image_url || song.imageUrl || null,
     coverUrl: artworkSong.coverUrl || null,
     cover_url: song.cover_url || song.coverUrl || null,

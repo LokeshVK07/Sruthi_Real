@@ -814,24 +814,21 @@ async function handleArtwork(url, request, env, ctx) {
   const cached = await caches.default.match(cacheKey);
   if (cached) return withCors(cached);
 
-  const row = await env.DB.prepare("SELECT image_url, album_url FROM songs WHERE id = ? LIMIT 1")
+  const row = await env.DB.prepare("SELECT image_url, album_url, title, movie, composer, artist FROM songs WHERE id = ? LIMIT 1")
     .bind(songId).first();
+  const candidates = [];
   const imageUrl = cleanText(row?.image_url);
-  if (!imageUrl) return new Response(null, { status: 404, headers: corsHeaders() });
+  if (imageUrl) candidates.push({ url: imageUrl, referer: cleanText(row?.album_url) || SITE_ORIGIN });
+  const appleArtworkUrl = await findAppleArtwork(row);
+  if (appleArtworkUrl) candidates.push({ url: appleArtworkUrl, referer: "https://music.apple.com/" });
 
-  const upstream = await fetch(imageUrl, {
-    headers: {
-      Accept: "image/jpeg,image/webp,image/*,*/*;q=0.8",
-      Referer: cleanText(row?.album_url) || SITE_ORIGIN,
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    },
-    redirect: "follow",
-  });
-
-  if (!upstream.ok) {
-    return Response.redirect(imageUrl, 302);
+  let upstream = null;
+  for (const candidate of candidates) {
+    upstream = await fetchArtworkCandidate(candidate.url, candidate.referer);
+    if (upstream) break;
   }
+
+  if (!upstream) return new Response(null, { status: 404, headers: corsHeaders() });
 
   const outHeaders = new Headers(corsHeaders());
   outHeaders.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
@@ -841,6 +838,71 @@ async function handleArtwork(url, request, env, ctx) {
   const response = new Response(upstream.body, { status: 200, headers: outHeaders });
   ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;
+}
+
+async function fetchArtworkCandidate(imageUrl, referer) {
+  const url = cleanText(imageUrl);
+  if (!url) return null;
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        Accept: "image/avif,image/webp,image/jpeg,image/png,image/*,*/*;q=0.8",
+        Referer: cleanText(referer) || SITE_ORIGIN,
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      },
+      redirect: "follow",
+    });
+    const contentType = cleanText(upstream.headers.get("content-type")).toLowerCase();
+    if (!upstream.ok || !contentType.startsWith("image/")) return null;
+    return upstream;
+  } catch {
+    return null;
+  }
+}
+
+async function findAppleArtwork(row) {
+  const movie = cleanText(row?.movie);
+  const composer = cleanText(row?.composer || row?.artist);
+  const title = cleanText(row?.title);
+  const terms = [
+    [movie, composer].filter(Boolean).join(" "),
+    [movie, title].filter(Boolean).join(" "),
+  ].filter(Boolean);
+
+  for (const term of unique(terms)) {
+    try {
+      const url = new URL("https://itunes.apple.com/search");
+      url.searchParams.set("term", term);
+      url.searchParams.set("country", "IN");
+      url.searchParams.set("media", "music");
+      url.searchParams.set("entity", "album");
+      url.searchParams.set("limit", "6");
+      const response = await fetch(url.toString(), {
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      const normalizedMovie = normalizeArtworkSearchText(movie);
+      const best =
+        results.find((item) => normalizeArtworkSearchText(item?.collectionName).includes(normalizedMovie)) ||
+        results[0];
+      const artwork = cleanText(best?.artworkUrl100 || best?.artworkUrl60);
+      if (artwork) return artwork.replace(/\/\d+x\d+bb\.(jpg|png|webp)$/i, "/600x600bb.$1");
+    } catch {
+      // Try the next term.
+    }
+  }
+  return null;
+}
+
+function normalizeArtworkSearchText(value) {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function trackDlUrl(track, albumUrl) {
