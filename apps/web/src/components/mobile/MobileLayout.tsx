@@ -14,6 +14,7 @@ import MobilePlaylists from "./MobilePlaylists";
 import MobileQueueSheet from "./MobileQueueSheet";
 import MobileRefreshStatusSheet from "./MobileRefreshStatusSheet";
 import MobileSearch from "./MobileSearch";
+import { imageForSong, replaceBrokenArtwork } from "../../artwork";
 
 export type MobileLibrarySection = "favorites" | "playlists" | "albums" | "artists" | "recent";
 
@@ -328,7 +329,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
           <div className="mobile-recent-list">
             {favorites.map((song) => (
               <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, favorites)}>
-                <img src={song.artworkUrl || fallbackArt} alt={song.title} />
+                <img src={imageForSong(song)} alt={song.title} onError={replaceBrokenArtwork} />
                 <div className="mobile-song-row__copy">
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -350,7 +351,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
           <div className="mobile-recent-list">
             {recentlyPlayed.map((song) => (
               <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song)}>
-                <img src={song.artworkUrl || fallbackArt} alt={song.title} />
+                <img src={imageForSong(song)} alt={song.title} onError={replaceBrokenArtwork} />
                 <div className="mobile-song-row__copy">
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -405,7 +406,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
       {currentSong ? (
         <MobileMiniPlayer
           song={currentSong}
-          artwork={currentSong.artworkUrl || fallbackArt}
+          artwork={imageForSong(currentSong)}
           currentTime={currentTime}
           duration={duration}
           isPlaying={isPlaying}
@@ -421,7 +422,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
       <MobileFullPlayer
         open={fullPlayerOpen}
         song={currentSong}
-        artwork={currentSong?.artworkUrl || fallbackArt}
+        artwork={imageForSong(currentSong)}
         currentTime={currentTime}
         duration={duration}
         volume={volume}

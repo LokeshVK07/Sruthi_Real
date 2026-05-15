@@ -1,5 +1,6 @@
 import { ChevronLeft, Play, Shuffle } from "lucide-react";
 import type { AlbumDetail, Song } from "../../types";
+import { imageForAlbum, replaceBrokenArtwork } from "../../artwork";
 
 type MobileAlbumDetailProps = {
   album: AlbumDetail;
@@ -24,7 +25,7 @@ export default function MobileAlbumDetail({ album, fallbackArt, onBack, onPlayTr
       </div>
 
       <div className="mobile-album-hero">
-        <img src={album.imageUrl || fallbackArt} alt={album.name} />
+        <img src={imageForAlbum(album)} alt={album.name} onError={replaceBrokenArtwork} />
         <div>
           <strong>{album.name}</strong>
           <span>{album.musicDirector || album.singersSummary || "Tamil soundtrack"}</span>

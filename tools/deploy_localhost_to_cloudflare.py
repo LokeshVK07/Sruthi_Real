@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import tempfile
 import shutil
 import subprocess
 import sys
@@ -12,17 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CLOUDFLARE_DIR = ROOT / "cloudflare"
 PUBLIC_DIR = CLOUDFLARE_DIR / "public"
 GENERATED_DIR = CLOUDFLARE_DIR / ".generated"
+WEB_APP_DIR = ROOT / "apps" / "web"
+WEB_DIST_DIR = WEB_APP_DIR / "dist"
 DEFAULT_REPO = "LokeshVK07/Sruthi"
-
-ROOT_PUBLIC_FILES = [
-  "index.html",
-  "app.js",
-  "app-new.js",
-  "styles.css",
-  "styles-new.css",
-  "Sruthi_kutty.jpg",
-]
-
 
 def parse_args():
   parser = argparse.ArgumentParser(
@@ -33,6 +26,11 @@ def parse_args():
   parser.add_argument("--skip-slot-update", action="store_true", help="Deploy without updating SRUTHI_ACTIVE_D1_SLOT.")
   parser.add_argument("--skip-asset-sync", action="store_true", help="Assume cloudflare/public is already in sync.")
   parser.add_argument("--skip-release-build", action="store_true", help="Assume cloudflare/data/seed.sql is already valid.")
+  parser.add_argument(
+    "--allow-incomplete-catalog",
+    action="store_true",
+    help="Bypass release baseline minimums for this deploy only. Use when intentionally publishing a smaller local catalog.",
+  )
   return parser.parse_args()
 
 
@@ -60,13 +58,21 @@ def ensure_file(path: Path):
     raise SystemExit(f"Required file is missing: {path}")
 
 
+def build_vibe_frontend():
+  if not WEB_APP_DIR.exists():
+    raise SystemExit(f"Expected Vibe frontend app to exist: {WEB_APP_DIR}")
+  ensure_file(WEB_APP_DIR / "package.json")
+  run(["npm", "run", "build"], cwd=WEB_APP_DIR)
+  if not WEB_DIST_DIR.is_dir():
+    raise SystemExit(f"Expected built frontend directory to exist: {WEB_DIST_DIR}")
+  return True
+
+
 def sync_public_bundle():
-  PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-  for relative in ROOT_PUBLIC_FILES:
-    source = ROOT / relative
-    destination = PUBLIC_DIR / relative
-    ensure_file(source)
-    shutil.copy2(source, destination)
+  build_vibe_frontend()
+  if PUBLIC_DIR.exists():
+    shutil.rmtree(PUBLIC_DIR)
+  shutil.copytree(WEB_DIST_DIR, PUBLIC_DIR)
 
 
 def catalog_config(catalog: str):
@@ -154,6 +160,42 @@ def build_release(config: dict):
       str(config["seed"]),
       "--baseline",
       str(config["baseline"]),
+      "--manifest",
+      str(config["manifest"]),
+      "--duckdb-path",
+      str(config["duckdb"]),
+    ]
+  )
+
+
+def build_release_allowing_incomplete_catalog(config: dict):
+  ensure_file(config["data_db"])
+  GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+
+  with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+    json.dump(
+      {
+        "minAlbumCount": 1,
+        "minSongCount": 1,
+        "minPlayableSongCount": 1,
+        "minDistinctMovieCount": 1,
+      },
+      handle,
+    )
+    handle.write("\n")
+    temporary_baseline = handle.name
+
+  print("Deploy override enabled: allowing incomplete catalog counts for this deploy only.")
+  run(
+    [
+      "python3",
+      str(CLOUDFLARE_DIR / "scripts" / "prepare_release.py"),
+      "--db",
+      str(config["data_db"]),
+      "--seed",
+      str(config["seed"]),
+      "--baseline",
+      temporary_baseline,
       "--manifest",
       str(config["manifest"]),
       "--duckdb-path",
@@ -312,7 +354,10 @@ def main():
   target = resolve_target_slot(variables, config)
 
   if not args.skip_release_build:
-    build_release(config)
+    if args.allow_incomplete_catalog:
+      build_release_allowing_incomplete_catalog(config)
+    else:
+      build_release(config)
 
   config_path = render_config(
     target["database_id"],

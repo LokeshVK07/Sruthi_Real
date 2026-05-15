@@ -1,5 +1,6 @@
 import { Trash2, X, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import type { Song } from "../../types";
+import { imageForSong, replaceBrokenArtwork } from "../../artwork";
 
 type MobileQueueSheetProps = {
   open: boolean;
@@ -49,7 +50,7 @@ export default function MobileQueueSheet({
           {queue.map((song, index) => (
             <div key={`${song.id}-${index}`} className={song.id === currentSongId ? "mobile-queue-row is-active" : "mobile-queue-row"}>
               <button type="button" className="mobile-queue-row__main" onClick={() => onPlay(song)}>
-                <img src={song.artworkUrl || fallbackArt} alt={song.title} />
+                <img src={imageForSong(song)} alt={song.title} onError={replaceBrokenArtwork} />
                 <div className="mobile-queue-row__copy">
                   <strong title={song.title}>{song.title}</strong>
                   <span title={song.artist}>{song.artist}</span>

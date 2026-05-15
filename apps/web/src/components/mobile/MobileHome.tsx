@@ -1,6 +1,7 @@
 import { ChevronRight, Heart, ListMusic, Play, Plus, RefreshCw, Search, Settings2 } from "lucide-react";
 import AppLogo from "../AppLogo";
 import type { RefreshStatus, Song } from "../../types";
+import { imageForSong, replaceBrokenArtwork } from "../../artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 
@@ -157,7 +158,7 @@ export default function MobileHome({
                 onClick={() => onPlayTrack(track)}
                 onMouseEnter={() => onPrefetchTrack?.(track)}
               >
-                <img src={track.artworkUrl || ""} alt={track.title} />
+                <img src={imageForSong(track)} alt={track.title} onError={replaceBrokenArtwork} />
                 <div className="mobile-song-row__copy">
                   <strong title={track.title}>{track.title}</strong>
                   <span title={track.artist}>{track.artist}</span>

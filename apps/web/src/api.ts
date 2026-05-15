@@ -13,6 +13,8 @@ type LegacySong = {
   audioUrl?: string;
   sourceUrl?: string;
   imageUrl?: string | null;
+  albumArtUrl?: string | null;
+  coverUrl?: string | null;
   downloadLinks?: Array<{ label?: string; url: string; bitrate?: number }>;
   spotify?: Record<string, unknown>;
   lastRefreshedAt?: string;
@@ -113,13 +115,17 @@ function normalizeSong(song: LegacySong, favorites: Set<string>): Song {
   const albumId = slugify(song.albumUrl || albumTitle);
   const favorite = favorites.has(song.id);
   const audioUrl = absoluteStreamUrl(song.audioUrl || "");
+  const directArtwork = song.imageUrl || song.albumArtUrl || song.coverUrl || null;
   return {
     id: song.id,
     title: song.title || "Unknown track",
     artist: song.artist || song.singers || song.composer || "Unknown artist",
     albumTitle,
     albumId,
-    artworkUrl: artworkUrlForSong(song.id, song.lastRefreshedAt),
+    artworkUrl: directArtwork || artworkUrlForSong(song.id, song.lastRefreshedAt),
+    albumArtUrl: song.albumArtUrl || song.imageUrl || null,
+    imageUrl: song.imageUrl || null,
+    coverUrl: song.coverUrl || song.imageUrl || null,
     audioUrl,
     streamUrl: audioUrl,
     favorite,
@@ -137,7 +143,10 @@ function normalizeAlbumSongs(songs: Song[]): Album[] {
     const existing = byId.get(song.albumId);
     if (existing) {
       existing.trackCount += 1;
-      if (!existing.imageUrl && song.artworkUrl) existing.imageUrl = song.artworkUrl;
+      if (!existing.imageUrl && (song.imageUrl || song.artworkUrl)) existing.imageUrl = song.imageUrl || song.artworkUrl;
+      if (!existing.coverUrl && (song.coverUrl || song.imageUrl || song.artworkUrl)) {
+        existing.coverUrl = song.coverUrl || song.imageUrl || song.artworkUrl;
+      }
       continue;
     }
     byId.set(song.albumId, {
@@ -147,7 +156,8 @@ function normalizeAlbumSongs(songs: Song[]): Album[] {
       year: song.year ?? null,
       musicDirector: song.composer ?? null,
       singersSummary: song.artist ?? null,
-      imageUrl: song.artworkUrl ?? null,
+      imageUrl: song.imageUrl || song.artworkUrl || null,
+      coverUrl: song.coverUrl || song.imageUrl || song.artworkUrl || null,
       language: "Tamil",
       trackCount: 1,
       updatedAt: song.updatedAt,

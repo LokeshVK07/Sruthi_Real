@@ -828,7 +828,9 @@ async function handleArtwork(url, request, env, ctx) {
     redirect: "follow",
   });
 
-  if (!upstream.ok) return new Response(null, { status: 502, headers: corsHeaders() });
+  if (!upstream.ok) {
+    return Response.redirect(imageUrl, 302);
+  }
 
   const outHeaders = new Headers(corsHeaders());
   outHeaders.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
@@ -969,13 +971,24 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   });
   if (rangeHeader) headers.set("Range", rangeHeader);
 
-  const response = await fetch(target, {
+  let response = await fetch(target, {
     method: "GET",
     headers,
     redirect: "follow",
   });
 
-  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  let contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if ((!response.ok || contentType.includes("text/html") || contentType.includes("text/plain")) && rangeHeader) {
+    const retryHeaders = new Headers(headers);
+    retryHeaders.delete("Range");
+    response = await fetch(target, {
+      method: "GET",
+      headers: retryHeaders,
+      redirect: "follow",
+    });
+    contentType = (response.headers.get("content-type") || "").toLowerCase();
+  }
+
   if (!response.ok) return null;
   if (contentType.includes("text/html") || contentType.includes("text/plain")) return null;
 

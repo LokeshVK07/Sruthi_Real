@@ -1,5 +1,6 @@
 import { Search, X, Loader2 } from "lucide-react";
 import type { Album, ComposerCollection, Song } from "../../types";
+import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 
@@ -160,7 +161,7 @@ export default function MobileSearch({
           <h2>Tracks</h2>
           {songs.slice(0, 30).map((song) => (
             <button key={song.id} type="button" className="mobile-result-row" onClick={() => onPlaySong(song)}>
-              <img src={song.artworkUrl || fallbackArt} alt={song.title} loading="lazy" />
+              <img src={imageForSong(song)} alt={song.title} loading="lazy" onError={replaceBrokenArtwork} />
               <div>
                 <strong>{song.title}</strong>
                 <span>{song.artist}</span>
@@ -180,7 +181,7 @@ export default function MobileSearch({
               className="mobile-result-row"
               onClick={() => onOpenAlbum(album.albumId)}
             >
-              <img src={album.imageUrl || fallbackArt} alt={album.name} loading="lazy" />
+              <img src={imageForAlbum(album)} alt={album.name} loading="lazy" onError={replaceBrokenArtwork} />
               <div>
                 <strong>{album.name}</strong>
                 <span>{album.musicDirector || album.singersSummary || "Album"}</span>

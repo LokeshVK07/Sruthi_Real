@@ -1,5 +1,6 @@
 import { ChevronLeft } from "lucide-react";
 import type { Album, Song } from "../../types";
+import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../artwork";
 
 type MobileArtistDetailProps = {
   artist: string;
@@ -39,7 +40,7 @@ export default function MobileArtistDetail({
         <div className="mobile-recent-list">
           {songs.slice(0, 12).map((song) => (
             <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, songs)}>
-              <img src={song.artworkUrl || fallbackArt} alt={song.title} />
+              <img src={imageForSong(song)} alt={song.title} onError={replaceBrokenArtwork} />
               <div className="mobile-song-row__copy">
                 <strong>{song.title}</strong>
                 <span>{song.albumTitle}</span>
@@ -54,7 +55,7 @@ export default function MobileArtistDetail({
         <div className="mobile-favorites-row">
           {albums.map((album) => (
             <button key={album.albumId} type="button" className="mobile-favorite-card" onClick={() => onOpenAlbum(album.albumId)}>
-              <img src={album.imageUrl || fallbackArt} alt={album.name} />
+              <img src={imageForAlbum(album)} alt={album.name} onError={replaceBrokenArtwork} />
               <strong>{album.name}</strong>
               <span>{album.musicDirector || "Album"}</span>
             </button>

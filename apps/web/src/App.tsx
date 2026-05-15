@@ -15,6 +15,7 @@ import type { MobileLibrarySection } from "./components/mobile/MobileLayout";
 import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
+import { fallbackArt, imageForAlbum, imageForSong, replaceBrokenArtwork } from "./artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 type ViewMode = "grid" | "list";
@@ -43,9 +44,6 @@ const QUEUE_KEY = "sruthi-queue";
 const APP_NAME = "Sruthi 2.o";
 const DEV_PLAYBACK_LOG = import.meta.env.DEV;
 
-const fallbackArt =
-  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23191343'/><stop offset='45%' stop-color='%235320bf'/><stop offset='100%' stop-color='%23e668ff'/></linearGradient></defs><rect width='800' height='800' rx='44' fill='url(%23g)'/><circle cx='602' cy='170' r='164' fill='rgba(255,255,255,0.1)'/><circle cx='208' cy='625' r='185' fill='rgba(255,255,255,0.08)'/><path d='M518 168v296c0 30-24 55-69 71-34 12-78 11-98-4-21-14-18-39 6-54 22-14 55-20 84-16V245l166-36v211c0 31-24 56-69 72-35 12-78 11-99-4-21-15-17-39 7-54 21-14 54-20 84-16V168h-12Z' fill='white' fill-opacity='.9'/></svg>";
-
 const navItems = [
   { key: "home", label: "Home", icon: Home },
   { key: "search", label: "Search", icon: Search },
@@ -56,10 +54,6 @@ const navItems = [
 
 function safeDuration(song?: Song | null) {
   return song?.durationSeconds && song.durationSeconds > 0 ? song.durationSeconds : 240;
-}
-
-function imageFor(song?: Song | null) {
-  return song?.artworkUrl || fallbackArt;
 }
 
 function songStreamUrl(song: Song) {
@@ -1173,7 +1167,7 @@ export default function App() {
             {filteredFavoriteSongs.map((song) => (
               <button key={song.id} className={viewMode === "grid" ? "recent-card" : "recent-row"} onClick={() => handleSongSelect(song, favoriteSongs)}>
                 <div className="recent-card__media">
-                  <img src={song.artworkUrl || fallbackArt} alt={song.title} loading="lazy" decoding="async" />
+                  <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1203,7 +1197,7 @@ export default function App() {
                 onClick={() => handleSongSelect(song, queueFromAlbum(song.albumId, fullLibrary))}
               >
                 <div className="recent-card__media">
-                  <img src={song.artworkUrl || fallbackArt} alt={song.title} loading="lazy" decoding="async" />
+                  <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1269,7 +1263,7 @@ export default function App() {
               {selectedAlbum.songs.map((song) => (
                 <div key={song.id} className="track-row">
                   <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbum.songs)}>
-                    <img src={imageFor(song)} alt={song.title} loading="lazy" decoding="async" />
+                    <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1302,7 +1296,7 @@ export default function App() {
                   handleOpenAlbumView(album.albumId);
                 }}
               >
-                <img src={album.imageUrl || fallbackArt} alt={album.name} loading="lazy" decoding="async" />
+                <img src={imageForAlbum(album)} alt={album.name} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                 <div>
                   <strong>{album.name}</strong>
                   <span>{album.musicDirector || album.singersSummary || "Tamil soundtrack"}</span>
@@ -1337,7 +1331,7 @@ export default function App() {
                     onMouseEnter={() => requestSongPrefetch([song.id])}
                     onClick={() => handleSongSelect(song, composerSongs)}
                   >
-                    <img src={imageFor(song)} alt={song.title} loading="lazy" decoding="async" />
+                    <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1378,7 +1372,7 @@ export default function App() {
                 >
                   <div className="composer-card__media">
                     {composer.coverUrl ? (
-                      <img src={composer.coverUrl} alt={composer.name} />
+                      <img src={composer.coverUrl} alt={composer.name} onError={replaceBrokenArtwork} />
                     ) : (
                       <span className="composer-card__monogram">{composer.name.charAt(0)}</span>
                     )}
@@ -1409,7 +1403,7 @@ export default function App() {
                 {selectedPlaylistSongs.map((song) => (
                   <div key={song.id} className="track-row">
                     <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
-                      <img src={imageFor(song)} alt={song.title} loading="lazy" decoding="async" />
+                      <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                       <div>
                         <strong>{song.title}</strong>
                         <span>{song.artist}</span>
@@ -1454,7 +1448,7 @@ export default function App() {
           {filteredSongs.slice(0, 24).map((song) => (
             <div key={song.id} className="track-row">
               <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, filteredSongs)}>
-                <img src={imageFor(song)} alt={song.title} loading="lazy" decoding="async" />
+                <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
                 <div>
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -1721,8 +1715,8 @@ export default function App() {
 
               <NowPlayingHero
                 song={currentSong}
-                artwork={imageFor(currentSong)}
-                background={imageFor(currentSong)}
+                artwork={imageForSong(currentSong)}
+                background={imageForSong(currentSong)}
                 orchestraLine={orchestraLine}
                 albumLabel={heroAlbumLabel}
                 isPlaying={playing}
