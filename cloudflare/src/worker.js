@@ -919,22 +919,44 @@ function normalizeArtworkSearchText(value) {
 }
 
 function trackDlUrl(track, albumUrl) {
-  const primary = cleanText(track?.dl_path);
-  if (!primary) return null;
-  if (primary.includes("/p128_cdn/")) return absoluteUrl(primary.replace("/p128_cdn/", "/p320_cdn/"), albumUrl);
-  return absoluteUrl(primary, albumUrl);
+  return trackAudioUrls(track, albumUrl)[0] || null;
 }
 
-async function fetchFreshAudioUrl(row, env) {
+function trackAudioUrls(track, albumUrl) {
+  const primary = cleanText(track?.dl_path);
+  const urls = [];
+  const push = (value) => {
+    const absolute = absoluteUrl(value, albumUrl);
+    if (absolute && !urls.includes(absolute)) urls.push(absolute);
+  };
+  if (primary.includes("/p128_cdn/")) {
+    push(primary);
+    push(primary.replace("/p128_cdn/", "/p320_cdn/"));
+  } else if (primary.includes("/p320_cdn/")) {
+    push(primary);
+    push(primary.replace("/p320_cdn/", "/p128_cdn/"));
+  } else if (primary) {
+    push(primary);
+  }
+  return urls;
+}
+
+async function fetchFreshAudioUrls(row, env, options = {}) {
   const albumUrl = cleanText(row.album_url);
-  if (!albumUrl) return null;
+  if (!albumUrl) return [];
 
   const songId = String(cleanText(String(row.id)));
   const songPageUrl = cleanText(row.song_page_url);
   const kvKey = `tracks:${albumUrl}`;
+  const bypassCache = Boolean(options?.bypassCache);
 
   // KV cache hit → return immediately without any upstream fetch.
-  if (env?.TOKEN_CACHE) {
+  if (env?.TOKEN_CACHE && bypassCache) {
+    try {
+      await env.TOKEN_CACHE.delete(kvKey);
+    } catch {}
+  }
+  if (env?.TOKEN_CACHE && !bypassCache) {
     try {
       const cached = await env.TOKEN_CACHE.get(kvKey, "json");
       if (Array.isArray(cached)) {
@@ -942,30 +964,36 @@ async function fetchFreshAudioUrl(row, env) {
           cached.find((t) => String(t.id) === songId) ||
           (songPageUrl && cached.find((t) => t.sp === songPageUrl)) ||
           null;
-        if (entry?.dl) return entry.dl;
+        const urls = unique([entry?.dl128, entry?.dl320, entry?.dl].map(cleanText).filter(Boolean));
+        if (urls.length) return urls;
       }
     } catch {}
   }
 
   // KV miss — fetch the album page for fresh signed URLs.
   const html = await fetchText(albumUrl);
-  if (!html || !html.includes("window.albumTracks")) return null;
+  if (!html || !html.includes("window.albumTracks")) return [];
   const tracks = extractAlbumTracks(html);
-  if (!tracks.length) return null;
+  if (!tracks.length) return [];
 
-  // Populate KV cache for the whole album (30-minute TTL matches typical token life).
+  // Populate KV cache for the whole album. Keep this intentionally short:
+  // MassTamilan downloader tokens can be challenged/expired before their URL
+  // timestamp, and a stale KV token should never trap playback for 30 minutes.
   if (env?.TOKEN_CACHE) {
     const payload = tracks
-      .map((t) => ({ id: String(t.id || ""), sp: cleanText(t.songPageUrl), dl: trackDlUrl(t, albumUrl) }))
-      .filter((t) => t.dl);
-    env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 1800 }).catch(() => {});
+      .map((t) => {
+        const urls = trackAudioUrls(t, albumUrl);
+        return { id: String(t.id || ""), sp: cleanText(t.songPageUrl), dl128: urls.find((item) => item.includes("/p128_cdn/")) || urls[0] || "", dl320: urls.find((item) => item.includes("/p320_cdn/")) || urls[1] || "", dl: urls[0] || "" };
+      })
+      .filter((t) => t.dl || t.dl128 || t.dl320);
+    env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 300 }).catch(() => {});
   }
 
   const track =
     tracks.find((t) => String(t.id || "") === songId) ||
     (songPageUrl && tracks.find((t) => cleanText(t.songPageUrl) === songPageUrl)) ||
     null;
-  return trackDlUrl(track, albumUrl);
+  return trackAudioUrls(track, albumUrl);
 }
 
 async function handleStream(songId, request, env, ctx) {
@@ -997,7 +1025,7 @@ async function handleStream(songId, request, env, ctx) {
   // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
   // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
   // stale-URL attempt below, so no wall-clock time is wasted.
-  const freshUrlPromise = fetchFreshAudioUrl(row, env);
+  const freshUrlsPromise = fetchFreshAudioUrls(row, env);
 
   let response = await tryAudioCandidates(row, request);
   if (response) {
@@ -1006,15 +1034,28 @@ async function handleStream(songId, request, env, ctx) {
     return response;
   }
 
-  // Stored URLs returned 403. Await the fresh URL (usually already resolved).
-  const freshUrl = await freshUrlPromise;
-  if (freshUrl) {
+  // Stored URLs returned 403. Await the fresh URLs (usually already resolved).
+  const freshUrls = await freshUrlsPromise;
+  for (const freshUrl of freshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
       // Refresh the DB token rows in the background so future stored-URL
       // checks will succeed until the KV entry also covers the album.
+      ctx?.waitUntil(tryRefreshSongLink(env, row));
+      return response;
+    }
+  }
+
+  // If the KV token was stale/challenged, delete that cached token and force a
+  // fresh album lookup before the heavier DB refresh path.
+  const bypassedFreshUrls = await fetchFreshAudioUrls(row, env, { bypassCache: true });
+  for (const freshUrl of bypassedFreshUrls) {
+    response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
+    if (response) {
+      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+      else ctx?.waitUntil(warmSongInCache(env, origin, row));
       ctx?.waitUntil(tryRefreshSongLink(env, row));
       return response;
     }
@@ -1070,7 +1111,7 @@ async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
 async function tryAudioCandidates(row, request) {
   const range = request.headers.get("Range");
   const baseUrl = cleanText(row.album_url || row.song_page_url || row.source_url);
-  for (const candidate of [row.audio_128_url, row.audio_320_url]) {
+  for (const candidate of unique([row.audio_128_url, row.audio_320_url, row.remote_audio_128_url, row.remote_audio_320_url].map(cleanText).filter(Boolean))) {
     const target = absoluteUrl(candidate, baseUrl);
     if (!target) continue;
     const upstream = await fetchAudio(target, row.album_url, range);
@@ -2023,6 +2064,18 @@ async function warmSongInCache(env, origin, row) {
   if (cached) return true;
 
   let response = await tryAudioCandidates(row, cacheKey);
+  if (!response) {
+    for (const freshUrl of await fetchFreshAudioUrls(row, env)) {
+      response = await fetchAudio(freshUrl, cleanText(row.album_url), null);
+      if (response) break;
+    }
+  }
+  if (!response) {
+    for (const freshUrl of await fetchFreshAudioUrls(row, env, { bypassCache: true })) {
+      response = await fetchAudio(freshUrl, cleanText(row.album_url), null);
+      if (response) break;
+    }
+  }
   if (!response) {
     const refreshed = await tryRefreshSongLink(env, row);
     if (refreshed) response = await tryAudioCandidates(refreshed, cacheKey);
