@@ -104,8 +104,6 @@ jobs:
             "cloudflare/wrangler.jsonc"
             "cloudflare/src/worker.js"
             "cloudflare/public/index.html"
-            "cloudflare/public/app.js"
-            "cloudflare/public/styles.css"
             "cloudflare/scripts/render_wrangler_config.py"
             "cloudflare/scripts/prepare_release.py"
             "cloudflare/scripts/export_d1_sql.py"
@@ -120,6 +118,18 @@ jobs:
               exit 1
             fi
           done
+
+          shopt -s nullglob
+          public_js=(cloudflare/public/assets/index-*.js)
+          public_css=(cloudflare/public/assets/index-*.css)
+          if (( ${#public_js[@]} == 0 )); then
+            echo "::error::Required Vite UI bundle is missing: cloudflare/public/assets/index-*.js"
+            exit 1
+          fi
+          if (( ${#public_css[@]} == 0 )); then
+            echo "::error::Required Vite UI stylesheet is missing: cloudflare/public/assets/index-*.css"
+            exit 1
+          fi
 
       - name: Resolve run mode
         run: |
