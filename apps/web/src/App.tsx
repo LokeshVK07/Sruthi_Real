@@ -50,6 +50,7 @@ const RECENTLY_PLAYED_STORAGE_KEY = "sruthi_recently_played";
 const MOBILE_SEARCH_HISTORY_KEY = "vibe2_search_history";
 const PLAYLISTS_KEY = "sruthi-playlists";
 const QUEUE_KEY = "sruthi-queue";
+const QUEUE_SNAPSHOT_KEY = "sruthi-queue-snapshot";
 const APP_NAME = "ViBe 2.o";
 const DEV_PLAYBACK_LOG = import.meta.env.DEV;
 
@@ -118,6 +119,27 @@ function updateRecentlyPlayedList(previous: Song[], track: Song) {
   return [track, ...withoutDuplicate].slice(0, MAX_RECENTLY_PLAYED);
 }
 
+function uniqueById(songs: Song[]) {
+  const seen = new Set<string>();
+  return songs.filter((song) => {
+    if (!song?.id || seen.has(song.id)) return false;
+    seen.add(song.id);
+    return true;
+  });
+}
+
+function readStoredTracks(key: string, limit = MAX_RECENTLY_PLAYED): Song[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidTrack).slice(0, limit);
+  } catch {
+    window.localStorage.removeItem(key);
+    return [];
+  }
+}
+
 async function safePlay(audio: HTMLAudioElement) {
   try {
     await audio.play();
@@ -154,8 +176,8 @@ export default function App() {
   const [heroMenuOpen, setHeroMenuOpen] = useState(false);
   const [expandedSection, setExpandedSection] = useState<"favorites" | "recent" | null>(null);
   const [heroFeedback, setHeroFeedback] = useState<string | null>(null);
-  const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>([]);
-  const [recentlyPlayedHydrated, setRecentlyPlayedHydrated] = useState(false);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>(() => readStoredTracks(RECENTLY_PLAYED_STORAGE_KEY));
+  const [recentlyPlayedHydrated, setRecentlyPlayedHydrated] = useState(() => typeof window !== "undefined");
   const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 640 : false));
   const [mobileTab, setMobileTab] = useState<MobileTabKey>("home");
   const [mobileLibrarySection, setMobileLibrarySection] = useState<MobileLibrarySection>("favorites");
@@ -314,10 +336,6 @@ export default function App() {
   const searchAlbumResults = useMemo(() => searchData?.albums ?? [], [searchData?.albums]);
   const searchArtistResults = useMemo(() => searchData?.artists ?? [], [searchData?.artists]);
   const searchComposerResults = useMemo(() => searchData?.composers ?? [], [searchData?.composers]);
-  const currentSong = useMemo(() => {
-    const queuedSong = enrichedQueue[currentIndex] ?? null;
-    return queuedSong ?? pickInitialSong(fullLibrary);
-  }, [enrichedQueue, currentIndex, fullLibrary]);
   const recentSongs = useMemo(
     () =>
       recentlyPlayed
@@ -325,6 +343,10 @@ export default function App() {
         .slice(0, MAX_RECENTLY_PLAYED),
     [recentlyPlayed, songLookup]
   );
+  const currentSong = useMemo(() => {
+    const queuedSong = enrichedQueue[currentIndex] ?? null;
+    return queuedSong ?? recentSongs[0] ?? pickInitialSong(fullLibrary);
+  }, [enrichedQueue, currentIndex, recentSongs, fullLibrary]);
   const artistItems = home?.artists ?? [];
   const filteredRecentSongs = useMemo(() => recentSongs.filter((song) => titleMatches(song, debouncedQuery)), [recentSongs, debouncedQuery]);
   const filteredFavoriteSongs = useMemo(() => favoriteSongs.filter((song) => titleMatches(song, debouncedQuery)), [favoriteSongs, debouncedQuery]);
@@ -488,7 +510,7 @@ export default function App() {
       updateRecentlyPlayed(track);
     }
     if (autoPlay) {
-      schedulePlaybackPrefetches(track, scopedQueue);
+      window.setTimeout(() => schedulePlaybackPrefetches(track, scopedQueue), 300);
     }
     setHeroMenuOpen(false);
   }
@@ -644,18 +666,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(RECENTLY_PLAYED_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const validTracks = parsed.filter(isValidTrack).slice(0, MAX_RECENTLY_PLAYED);
-      setRecentlyPlayed(validTracks);
-    } catch {
-      window.localStorage.removeItem(RECENTLY_PLAYED_STORAGE_KEY);
-    } finally {
-      setRecentlyPlayedHydrated(true);
-    }
+    setRecentlyPlayedHydrated(true);
   }, []);
 
   useEffect(() => {
@@ -670,6 +681,17 @@ export default function App() {
       // ignore storage failures
     }
   }, [recentlyPlayed]);
+
+  useEffect(() => {
+    const snapshotQueue = readStoredTracks(QUEUE_SNAPSHOT_KEY, 100);
+    if (!snapshotQueue.length) return;
+    setQueue(snapshotQueue, 0, false);
+    const firstPlayable = snapshotQueue[0];
+    if (firstPlayable) {
+      requestSongPrefetch(snapshotQueue.slice(0, 8).map((song) => song.id));
+      requestAlbumPrefetch(firstPlayable.albumId, 8, true);
+    }
+  }, [setQueue]);
 
   useEffect(() => {
     try {
@@ -762,6 +784,9 @@ export default function App() {
     if (!queueHydratedRef.current) return;
     try {
       window.localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.map((song) => song.id)));
+      if (queue.length) {
+        window.localStorage.setItem(QUEUE_SNAPSHOT_KEY, JSON.stringify(queue.slice(0, 100)));
+      }
     } catch {
       // ignore storage failures
     }
@@ -776,14 +801,27 @@ export default function App() {
     if (queueHydratedRef.current && queue.length) return;
     const initialQueue = queueFromAlbum(initial.albumId, fullLibrary);
     setQueue(initialQueue, Math.max(0, initialQueue.findIndex((song) => song.id === initial.id)), false);
-    requestSongPrefetch(fullLibrary.slice(0, 8).map((song) => song.id));
-    albumItems.slice(0, 3).forEach((album) => requestAlbumPrefetch(album.albumId, 4, false));
+    window.setTimeout(() => {
+      requestSongPrefetch(fullLibrary.slice(0, 8).map((song) => song.id));
+      albumItems.slice(0, 3).forEach((album) => requestAlbumPrefetch(album.albumId, 4, false));
+    }, 250);
   }, [fullLibrary, albumItems, queue.length, setQueue]);
 
   useEffect(() => {
     if (!selectedAlbumId) return;
     requestAlbumPrefetch(selectedAlbumId, 8, true);
   }, [selectedAlbumId]);
+
+  useEffect(() => {
+    const prioritySongs = uniqueById([...recentSongs.slice(0, 8), ...favoriteSongs.slice(0, 8), ...enrichedQueue.slice(0, 8)]).slice(0, 8);
+    if (!prioritySongs.length) return;
+    const timer = window.setTimeout(() => {
+      requestSongPrefetch(prioritySongs.map((song) => song.id));
+      const leadSong = prioritySongs[0];
+      if (leadSong) requestAlbumPrefetch(leadSong.albumId, 8, true);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [recentSongs, favoriteSongs, enrichedQueue]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -1884,7 +1922,7 @@ export default function App() {
             if (failedSongId && retries < 3 && currentSong && currentSong.id === failedSongId) {
               playbackRetryRef.current.set(failedSongId, retries + 1);
               const bust = `${songStreamUrl(currentSong)}${songStreamUrl(currentSong).includes("?") ? "&" : "?"}retry=${Date.now()}`;
-              const backoffMs = retries === 0 ? 250 : retries === 1 ? 1500 : 4000;
+              const backoffMs = retries === 0 ? 200 : retries === 1 ? 800 : 1600;
               debugPlayback("retry", failedSongId, retries + 1, `backoff=${backoffMs}ms`);
               setBuffering(true);
               window.setTimeout(() => {

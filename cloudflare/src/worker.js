@@ -3,6 +3,8 @@ const DEFAULT_SYNC_PATH = "/sruthi-sync.json";
 const TELUGU_ID_PREFIX = "telugu:";
 const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
+const STREAM_RANGE_TIMEOUT_MS = 2200;
+const STREAM_FULL_TIMEOUT_MS = 12000;
 const DEFAULT_TAMIL_OFFICIAL_PLAYLISTS = [
   { id: "top-100", name: "Top 100", sourceUrl: "https://www.masstamilan.dev/playlists/top-100-songs" },
   { id: "bgm-50", name: "BGM 50", sourceUrl: "https://www.masstamilan.dev/playlists/top-50-bgm-songs" },
@@ -1130,21 +1132,37 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   });
   if (rangeHeader) headers.set("Range", rangeHeader);
 
-  let response = await fetch(target, {
-    method: "GET",
-    headers,
-    redirect: "follow",
-  });
+  const timeoutMs = rangeHeader ? STREAM_RANGE_TIMEOUT_MS : STREAM_FULL_TIMEOUT_MS;
+  const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
+
+  let response;
+  try {
+    response = await fetch(target, {
+      method: "GET",
+      headers,
+      redirect: "follow",
+      signal,
+    });
+  } catch {
+    return null;
+  }
 
   let contentType = (response.headers.get("content-type") || "").toLowerCase();
   if ((!response.ok || contentType.includes("text/html") || contentType.includes("text/plain")) && rangeHeader) {
     const retryHeaders = new Headers(headers);
     retryHeaders.delete("Range");
-    response = await fetch(target, {
-      method: "GET",
-      headers: retryHeaders,
-      redirect: "follow",
-    });
+    try {
+      response = await fetch(target, {
+        method: "GET",
+        headers: retryHeaders,
+        redirect: "follow",
+        signal,
+      });
+    } catch {
+      return null;
+    }
     contentType = (response.headers.get("content-type") || "").toLowerCase();
   }
 
