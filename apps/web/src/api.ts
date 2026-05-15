@@ -53,6 +53,8 @@ const FAVORITES_KEY = "sruthi-favorites";
 const PLAYLISTS_KEY = "sruthi-playlists";
 const RECENTLY_PLAYED_STORAGE_KEY = "sruthi_recently_played";
 const LIBRARY_CACHE_TTL_MS = 15_000;
+const LIBRARY_PAGE_SIZE = 5000;
+const MAX_LIBRARY_PAGES = 20;
 
 let libraryCache:
   | {
@@ -186,10 +188,22 @@ async function fetchLegacyLibrary(force = false): Promise<Song[]> {
   if (!force && libraryCache && now - libraryCache.loadedAt < LIBRARY_CACHE_TTL_MS) {
     return libraryCache.promise;
   }
-  const promise = api<LegacyLibraryResponse>("/api/library?query=&decade=all&mood=all&offset=0&limit=20000").then((payload) => {
+  const promise = (async () => {
     const favorites = favoriteIds();
-    return payload.songs.map((song) => normalizeSong(song, favorites));
-  });
+    const songs: Song[] = [];
+    let offset = 0;
+    for (let page = 0; page < MAX_LIBRARY_PAGES; page += 1) {
+      const payload = await api<LegacyLibraryResponse>(
+        `/api/library?query=&decade=all&mood=all&offset=${offset}&limit=${LIBRARY_PAGE_SIZE}`,
+      );
+      songs.push(...payload.songs.map((song) => normalizeSong(song, favorites)));
+      if (!payload.hasMore || payload.songs.length < LIBRARY_PAGE_SIZE) {
+        break;
+      }
+      offset += payload.songs.length;
+    }
+    return songs;
+  })();
   libraryCache = { loadedAt: now, promise };
   return promise;
 }
