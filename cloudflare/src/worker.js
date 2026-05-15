@@ -523,9 +523,10 @@ async function handleApi(request, env, url, ctx) {
     const movie = cleanText(url.searchParams.get("movie")).toLowerCase();
     const decade = cleanText(url.searchParams.get("decade")) || "all";
     const offset = toInt(url.searchParams.get("offset"), 0);
-    const limit = Math.min(toInt(url.searchParams.get("limit"), 80), 120);
+    const fullCatalog = (url.searchParams.get("full") || "false").toLowerCase() === "true";
+    const limit = Math.min(toInt(url.searchParams.get("limit"), 80), fullCatalog ? 5000 : 120);
     const localSongs = (url.searchParams.get("localSongs") || "false").toLowerCase() === "true";
-    const homepage = isHomepageLibraryRequest({ query, movie, decade });
+    const homepage = !fullCatalog && isHomepageLibraryRequest({ query, movie, decade });
 
     if (localSongs) {
       return json({

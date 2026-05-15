@@ -194,7 +194,7 @@ async function fetchLegacyLibrary(force = false): Promise<Song[]> {
     let offset = 0;
     for (let page = 0; page < MAX_LIBRARY_PAGES; page += 1) {
       const payload = await api<LegacyLibraryResponse>(
-        `/api/library?query=&decade=all&mood=all&offset=${offset}&limit=${LIBRARY_PAGE_SIZE}`,
+        `/api/library?query=&decade=all&mood=all&full=true&offset=${offset}&limit=${LIBRARY_PAGE_SIZE}`,
       );
       songs.push(...payload.songs.map((song) => normalizeSong(song, favorites)));
       if (!payload.hasMore || payload.songs.length < LIBRARY_PAGE_SIZE) {
