@@ -14,7 +14,7 @@ import MobilePlaylists from "./MobilePlaylists";
 import MobileQueueSheet from "./MobileQueueSheet";
 import MobileRefreshStatusSheet from "./MobileRefreshStatusSheet";
 import MobileSearch from "./MobileSearch";
-import { imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 export type MobileLibrarySection = "favorites" | "playlists" | "albums" | "artists" | "recent";
 

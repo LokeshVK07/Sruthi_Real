@@ -1,7 +1,7 @@
 import { ChevronRight, Heart, ListMusic, Play, Plus, RefreshCw, Search, Settings2 } from "lucide-react";
 import AppLogo from "../AppLogo";
 import type { RefreshStatus, Song } from "../../types";
-import { imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 

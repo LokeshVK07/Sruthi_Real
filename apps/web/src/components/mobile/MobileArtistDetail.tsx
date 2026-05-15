@@ -1,6 +1,6 @@
 import { ChevronLeft } from "lucide-react";
 import type { Album, Song } from "../../types";
-import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 type MobileArtistDetailProps = {
   artist: string;

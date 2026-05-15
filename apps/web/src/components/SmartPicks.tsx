@@ -1,6 +1,6 @@
 import { Play, ChevronRight } from "lucide-react";
 import type { Song } from "../types";
-import { imageForSong, replaceBrokenArtwork } from "../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../utils/artwork";
 
 export type SmartPick = {
   id: string;

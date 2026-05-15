@@ -42,11 +42,11 @@ export default function Sidebar({
     <aside className="sidebar">
       <div className="sidebar__brand">
         <div className="sidebar__logo">
-          <img src="/Sruthi_kutty.jpg" alt="Sruthi 2.o" />
+          <img src="/Sruthi_kutty.jpg" alt="ViBe 2.o" />
         </div>
         <div>
-          <strong>Sruthi 2.o</strong>
-          <span>Tamil and Telugu media player</span>
+          <strong>ViBe 2.o</strong>
+          <span>Premium music player</span>
         </div>
       </div>
 

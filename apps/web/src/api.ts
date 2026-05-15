@@ -1,4 +1,5 @@
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, Playlist, RefreshStatus, Song } from "./types";
+import { normalizeAlbum as normalizeArtworkAlbum, normalizeSong as normalizeArtworkSong } from "./utils/artwork";
 
 type LegacySong = {
   id: string;
@@ -13,8 +14,12 @@ type LegacySong = {
   audioUrl?: string;
   sourceUrl?: string;
   imageUrl?: string | null;
+  image_url?: string | null;
   albumArtUrl?: string | null;
   coverUrl?: string | null;
+  cover_url?: string | null;
+  thumbnail?: string | null;
+  album_art?: string | null;
   downloadLinks?: Array<{ label?: string; url: string; bitrate?: number }>;
   spotify?: Record<string, unknown>;
   lastRefreshedAt?: string;
@@ -117,7 +122,8 @@ function normalizeSong(song: LegacySong, favorites: Set<string>): Song {
   const albumId = slugify(song.albumUrl || albumTitle);
   const favorite = favorites.has(song.id);
   const audioUrl = absoluteStreamUrl(song.audioUrl || "");
-  const directArtwork = song.imageUrl || song.albumArtUrl || song.coverUrl || null;
+  const artworkSong = normalizeArtworkSong(song);
+  const directArtwork = artworkSong.artworkUrl;
   return {
     id: song.id,
     title: song.title || "Unknown track",
@@ -125,9 +131,13 @@ function normalizeSong(song: LegacySong, favorites: Set<string>): Song {
     albumTitle,
     albumId,
     artworkUrl: directArtwork || artworkUrlForSong(song.id, song.lastRefreshedAt),
-    albumArtUrl: song.albumArtUrl || song.imageUrl || null,
-    imageUrl: song.imageUrl || null,
-    coverUrl: song.coverUrl || song.imageUrl || null,
+    albumArtUrl: song.albumArtUrl || song.imageUrl || song.image_url || null,
+    imageUrl: artworkSong.imageUrl || null,
+    image_url: song.image_url || song.imageUrl || null,
+    coverUrl: artworkSong.coverUrl || null,
+    cover_url: song.cover_url || song.coverUrl || null,
+    thumbnail: song.thumbnail || null,
+    album_art: song.album_art || null,
     audioUrl,
     streamUrl: audioUrl,
     favorite,
@@ -152,6 +162,13 @@ function normalizeAlbumSongs(songs: Song[]): Album[] {
       continue;
     }
     byId.set(song.albumId, {
+      ...normalizeArtworkAlbum({
+        albumId: song.albumId,
+        albumUrl: song.albumId,
+        name: song.albumTitle,
+        imageUrl: song.imageUrl || song.artworkUrl || null,
+        coverUrl: song.coverUrl || song.imageUrl || song.artworkUrl || null,
+      }),
       albumId: song.albumId,
       albumUrl: song.albumId,
       name: song.albumTitle,

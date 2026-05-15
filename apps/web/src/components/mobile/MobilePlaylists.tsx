@@ -1,6 +1,6 @@
 import { ChevronLeft, Pencil, Plus, Trash2 } from "lucide-react";
 import type { Song } from "../../types";
-import { imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 

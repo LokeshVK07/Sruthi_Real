@@ -1,6 +1,6 @@
 import { ChevronRight, Play } from "lucide-react";
 import type { Song } from "../types";
-import { imageForSong, replaceBrokenArtwork } from "../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../utils/artwork";
 
 type ViewMode = "grid" | "list";
 type Layout = "grid" | "row";

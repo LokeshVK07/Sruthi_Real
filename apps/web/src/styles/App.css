@@ -38,14 +38,14 @@
   --font-lg: 1.02rem;
   --font-xl: 1.2rem;
   --font-section: 1.18rem;
-  --font-hero: clamp(1.85rem, 2.6vw, 2.6rem);
+  --font-hero: clamp(2.35rem, 4vw, 4.35rem);
 
-  --hero-min-height: clamp(290px, 34vh, 360px);
-  --hero-cover-size: clamp(180px, 14vw, 220px);
-  --hero-padding: 24px 32px;
-  --hero-gap: clamp(28px, 3.4vw, 46px);
-  --hero-meta-height: clamp(118px, 13vh, 148px);
-  --hero-strip-width: 560px;
+  --hero-min-height: clamp(350px, 43vh, 460px);
+  --hero-cover-size: clamp(240px, 21vw, 340px);
+  --hero-padding: clamp(28px, 3vw, 44px) clamp(32px, 4vw, 56px);
+  --hero-gap: clamp(36px, 5vw, 72px);
+  --hero-meta-height: clamp(148px, 17vh, 194px);
+  --hero-strip-width: 760px;
 
   --control-size: 38px;
   --play-size: 60px;
@@ -400,7 +400,7 @@ img {
 .hero-card {
   position: relative;
   min-height: var(--hero-min-height);
-  overflow: visible;
+  overflow: hidden;
   padding: var(--hero-padding);
   z-index: 6;
 }
@@ -411,15 +411,18 @@ img {
   background-repeat: no-repeat;
   background-position: right center;
   background-size: cover;
-  opacity: 0.28;
-  filter: saturate(1.05) brightness(0.78);
+  opacity: 0.4;
+  filter: saturate(1.12) brightness(0.72) blur(0.2px);
+  transform: scale(1.02);
 }
 
 .hero-card::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(8, 8, 20, 0.96) 0%, rgba(9, 8, 21, 0.86) 48%, rgba(9, 8, 21, 0.18) 100%);
+  background:
+    radial-gradient(circle at 28% 50%, rgba(216, 92, 255, 0.1), transparent 32%),
+    linear-gradient(90deg, rgba(8, 8, 20, 0.94) 0%, rgba(9, 8, 21, 0.82) 46%, rgba(9, 8, 21, 0.44) 100%);
 }
 
 .hero {
@@ -435,9 +438,10 @@ img {
 .hero__cover-wrap {
   width: var(--hero-cover-size);
   height: var(--hero-cover-size);
-  border-radius: 18px;
+  border-radius: 24px;
   overflow: hidden;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.36);
+  background: #181326;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
   flex: 0 0 auto;
 }
 
@@ -445,6 +449,7 @@ img {
   height: 100%;
   width: 100%;
   object-fit: cover;
+  background: #181326;
 }
 
 .hero__body {
@@ -475,7 +480,7 @@ img {
   width: 100%;
   font-size: var(--font-hero);
   line-height: 1.05;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -932,6 +937,7 @@ img {
   overflow: hidden;
   aspect-ratio: 1 / 1;
   margin-bottom: 8px;
+  background: #181326;
 }
 
 .recent-card__media img {
@@ -1030,6 +1036,8 @@ img {
   height: 40px;
   border-radius: 10px;
   object-fit: cover;
+  background: #181326;
+  flex: 0 0 auto;
 }
 
 .track-row span {
@@ -1284,6 +1292,7 @@ img {
   height: var(--queue-thumb);
   border-radius: 10px;
   object-fit: cover;
+  background: #181326;
   flex: 0 0 auto;
 }
 

@@ -1,6 +1,6 @@
 import { ChevronLeft, Play, Shuffle } from "lucide-react";
 import type { AlbumDetail, Song } from "../../types";
-import { imageForAlbum, replaceBrokenArtwork } from "../../artwork";
+import { imageForAlbum, replaceBrokenArtwork } from "../../utils/artwork";
 
 type MobileAlbumDetailProps = {
   album: AlbumDetail;

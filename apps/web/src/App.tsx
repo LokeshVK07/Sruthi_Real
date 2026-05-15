@@ -15,7 +15,7 @@ import type { MobileLibrarySection } from "./components/mobile/MobileLayout";
 import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
-import { fallbackArt, imageForAlbum, imageForSong, replaceBrokenArtwork } from "./artwork";
+import { fallbackArt, heroArtworkFor, imageForAlbum, imageForSong, replaceBrokenArtwork } from "./utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 type ViewMode = "grid" | "list";
@@ -41,7 +41,7 @@ const RECENTLY_PLAYED_STORAGE_KEY = "sruthi_recently_played";
 const MOBILE_SEARCH_HISTORY_KEY = "vibe2_search_history";
 const PLAYLISTS_KEY = "sruthi-playlists";
 const QUEUE_KEY = "sruthi-queue";
-const APP_NAME = "Sruthi 2.o";
+const APP_NAME = "ViBe 2.o";
 const DEV_PLAYBACK_LOG = import.meta.env.DEV;
 
 const navItems = [
@@ -810,6 +810,11 @@ export default function App() {
   const orchestraLine =
     currentSong?.title.toLowerCase().includes("a life full of love theme") ? "Curated from your Tamil vault" : currentSong?.composer || "Tamil soundtrack";
   const heroAlbumLabel = currentSong?.albumTitle ?? "Selected album";
+  const currentAlbumArtwork = useMemo(
+    () => albumItems.find((album) => album.albumId === currentSong?.albumId) ?? null,
+    [albumItems, currentSong?.albumId],
+  );
+  const currentHeroArtwork = heroArtworkFor(currentSong, currentAlbumArtwork);
 
   const filteredSongs = useMemo(() => {
     const base =
@@ -1715,8 +1720,8 @@ export default function App() {
 
               <NowPlayingHero
                 song={currentSong}
-                artwork={imageForSong(currentSong)}
-                background={imageForSong(currentSong)}
+                artwork={currentHeroArtwork}
+                background={currentHeroArtwork}
                 orchestraLine={orchestraLine}
                 albumLabel={heroAlbumLabel}
                 isPlaying={playing}

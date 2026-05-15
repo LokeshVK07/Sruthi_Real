@@ -1,5 +1,6 @@
 import { ChevronUp, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import type { Song } from "../../types";
+import { replaceBrokenArtwork } from "../../utils/artwork";
 
 type MobileMiniPlayerProps = {
   song: Song;
@@ -29,7 +30,7 @@ export default function MobileMiniPlayer({
   return (
     <div className="mobile-mini-player">
       <button type="button" className="mobile-mini-player__main" onClick={onOpenPlayer}>
-        <img src={artwork} alt={song.title} />
+        <img src={artwork} alt={song.title} onError={replaceBrokenArtwork} />
         <div className="mobile-mini-player__copy">
           <strong title={song.title}>{song.title}</strong>
           <span title={song.artist}>{song.artist}</span>

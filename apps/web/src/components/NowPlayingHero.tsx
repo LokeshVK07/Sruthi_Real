@@ -2,6 +2,7 @@ import { Heart, MoreHorizontal, Pause, Play, Repeat, Shuffle, SkipBack, SkipForw
 import { useLayoutEffect, useRef } from "react";
 import type { Song } from "../types";
 import type { RepeatMode } from "../store";
+import { replaceBrokenArtwork } from "../utils/artwork";
 
 type NowPlayingHeroProps = {
   song: Song | null;
@@ -131,7 +132,7 @@ export default function NowPlayingHero({
       <div className="hero-card__glow" style={{ backgroundImage: `url(${background})` }} aria-hidden="true" />
       <div className="hero">
         <div className="hero__cover-wrap">
-          <img className="hero__cover" src={artwork} alt={song?.title ?? "Now playing"} />
+          <img className="hero__cover" src={artwork} alt={song?.title ?? "Now playing"} decoding="async" onError={replaceBrokenArtwork} />
         </div>
 
         <div className="hero__body">

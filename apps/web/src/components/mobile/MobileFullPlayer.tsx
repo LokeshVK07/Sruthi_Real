@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Song } from "../../types";
 import type { RepeatMode } from "../../store";
+import { replaceBrokenArtwork } from "../../utils/artwork";
 
 type MobileFullPlayerProps = {
   open: boolean;
@@ -106,7 +107,7 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
           </button>
         </div>
 
-        <img className="mobile-full-player__artwork" src={artwork} alt={song.title} />
+        <img className="mobile-full-player__artwork" src={artwork} alt={song.title} decoding="async" onError={replaceBrokenArtwork} />
 
         <div className="mobile-full-player__copy">
           <strong title={song.title}>{song.title}</strong>

@@ -1,6 +1,6 @@
 import { Search, X, Loader2 } from "lucide-react";
 import type { Album, ComposerCollection, Song } from "../../types";
-import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 

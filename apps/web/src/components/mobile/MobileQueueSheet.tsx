@@ -1,6 +1,6 @@
 import { Trash2, X, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import type { Song } from "../../types";
-import { imageForSong, replaceBrokenArtwork } from "../../artwork";
+import { imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
 
 type MobileQueueSheetProps = {
   open: boolean;
