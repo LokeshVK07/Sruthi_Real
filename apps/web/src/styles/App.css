@@ -41,7 +41,7 @@
   --font-hero: clamp(2.35rem, 4vw, 4.35rem);
 
   --hero-min-height: clamp(350px, 43vh, 460px);
-  --hero-cover-size: clamp(240px, 21vw, 340px);
+  --hero-cover-size: clamp(210px, 18vw, 290px);
   --hero-padding: clamp(28px, 3vw, 44px) clamp(32px, 4vw, 56px);
   --hero-gap: clamp(36px, 5vw, 72px);
   --hero-meta-height: clamp(148px, 17vh, 194px);
@@ -447,13 +447,15 @@ img {
   background: #181326;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
 }
 
 .hero__cover {
   height: 100%;
   width: 100%;
   object-fit: contain;
-  object-position: top center;
+  object-position: center center;
   background: #181326;
 }
 

@@ -970,9 +970,16 @@ async function fetchFreshAudioUrl(row, env) {
 
 async function handleStream(songId, request, env, ctx) {
   const range = request.headers.get("Range");
-  if (!range) {
-    const cached = await caches.default.match(request);
-    if (cached) return withCors(cached);
+  const origin = new URL(request.url).origin;
+  const cacheKey = new Request(`${origin}/api/stream/${songId}`);
+  const cached = await caches.default.match(cacheKey);
+  if (cached) {
+    if (range) {
+      const ranged = await rangeResponseFromCachedAudio(cached, range);
+      if (ranged) return ranged;
+    } else {
+      return withCors(cached);
+    }
   }
 
   let row = await env.DB.prepare(
@@ -994,7 +1001,8 @@ async function handleStream(songId, request, env, ctx) {
 
   let response = await tryAudioCandidates(row, request);
   if (response) {
-    if (!range) ctx?.waitUntil(caches.default.put(request, response.clone()));
+    if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+    else ctx?.waitUntil(warmSongInCache(env, origin, row));
     return response;
   }
 
@@ -1003,7 +1011,8 @@ async function handleStream(songId, request, env, ctx) {
   if (freshUrl) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
-      if (!range) ctx?.waitUntil(caches.default.put(request, response.clone()));
+      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+      else ctx?.waitUntil(warmSongInCache(env, origin, row));
       // Refresh the DB token rows in the background so future stored-URL
       // checks will succeed until the KV entry also covers the album.
       ctx?.waitUntil(tryRefreshSongLink(env, row));
@@ -1017,12 +1026,45 @@ async function handleStream(songId, request, env, ctx) {
     row = refreshed;
     response = await tryAudioCandidates(row, request);
     if (response) {
-      if (!range) ctx?.waitUntil(caches.default.put(request, response.clone()));
+      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+      else ctx?.waitUntil(warmSongInCache(env, origin, row));
       return response;
     }
   }
 
   return json({ error: "Upstream stream unavailable." }, 502);
+}
+
+async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(cleanText(rangeHeader));
+  if (!match) return null;
+  const body = await cachedResponse.arrayBuffer();
+  const total = body.byteLength;
+  if (!total) return null;
+
+  let start = match[1] ? Number(match[1]) : 0;
+  let end = match[2] ? Number(match[2]) : total - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  start = Math.max(0, start);
+  end = Math.min(total - 1, end);
+  if (start > end || start >= total) {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        ...corsHeaders(),
+        "Content-Range": `bytes */${total}`,
+        "Accept-Ranges": "bytes",
+      },
+    });
+  }
+
+  const headers = new Headers(corsHeaders());
+  headers.set("Content-Type", cachedResponse.headers.get("content-type") || "audio/mpeg");
+  headers.set("Content-Length", String(end - start + 1));
+  headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=3600");
+  return new Response(body.slice(start, end + 1), { status: 206, headers });
 }
 
 async function tryAudioCandidates(row, request) {
