@@ -630,6 +630,8 @@ async function handleApi(request, env, url, ctx) {
 
   if (url.pathname === "/api/albums") {
     const query = cleanText(url.searchParams.get("query")).toLowerCase();
+    const fullCatalog = (url.searchParams.get("full") || "false").toLowerCase() === "true";
+    const limit = Math.min(toInt(url.searchParams.get("limit"), 240), fullCatalog ? 6000 : 360);
     const bindings = [];
     const filters = [];
     if (query) {
@@ -652,9 +654,9 @@ async function handleApi(request, env, url, ctx) {
       FROM albums
       ${whereClause}
       ORDER BY year DESC, lower(title) ASC
-      LIMIT 6000
+      LIMIT ?
       `,
-    ).bind(...bindings).all();
+    ).bind(...bindings, limit).all();
     return json({ items: (rows.results || []).map(rowToAlbum) });
   }
 
