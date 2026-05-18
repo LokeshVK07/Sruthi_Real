@@ -1,6 +1,6 @@
 import { Play, ChevronRight } from "lucide-react";
 import type { Song } from "../types";
-import { imageForSong, replaceBrokenArtwork } from "../utils/artwork";
+import AbstractCover from "./AbstractCover";
 
 export type SmartPick = {
   id: string;
@@ -30,7 +30,7 @@ export default function SmartPicks({ picks, fallbackArt, onPick, onViewAll }: Sm
       <div className="smart-picks">
         {picks.map((pick) => (
           <button key={pick.id} className="smart-pick" onClick={() => onPick(pick.song)}>
-            <img src={imageForSong(pick.song)} alt={pick.title} onError={replaceBrokenArtwork} />
+            <AbstractCover seed={pick.song.id || pick.title} size="md" />
             <div className="smart-pick__copy">
               <strong>{pick.title}</strong>
               <span>{pick.subtitle}</span>

@@ -1,6 +1,6 @@
 import { ChevronLeft } from "lucide-react";
 import type { Album, Song } from "../../types";
-import { imageForAlbum, imageForSong, replaceBrokenArtwork } from "../../utils/artwork";
+import AbstractCover from "../AbstractCover";
 
 type MobileArtistDetailProps = {
   artist: string;
@@ -16,7 +16,7 @@ export default function MobileArtistDetail({
   artist,
   songs,
   albums,
-  fallbackArt,
+  fallbackArt: _fallbackArt,
   onBack,
   onPlayTrack,
   onOpenAlbum,
@@ -40,7 +40,7 @@ export default function MobileArtistDetail({
         <div className="mobile-recent-list">
           {songs.slice(0, 12).map((song) => (
             <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, songs)}>
-              <img src={imageForSong(song)} alt={song.title} onError={replaceBrokenArtwork} />
+              <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
               <div className="mobile-song-row__copy">
                 <strong>{song.title}</strong>
                 <span>{song.albumTitle}</span>
@@ -55,7 +55,7 @@ export default function MobileArtistDetail({
         <div className="mobile-favorites-row">
           {albums.map((album) => (
             <button key={album.albumId} type="button" className="mobile-favorite-card" onClick={() => onOpenAlbum(album.albumId)}>
-              <img src={imageForAlbum(album)} alt={album.name} onError={replaceBrokenArtwork} />
+              <AbstractCover seed={album.albumId || album.name} size="md" className="mobile-artwork" />
               <strong>{album.name}</strong>
               <span>{album.musicDirector || "Album"}</span>
             </button>

@@ -6,7 +6,7 @@ on:
       full_refresh:
         description: Run a full catalog refresh instead of incremental mode
         required: false
-        default: true
+        default: false
         type: boolean
   schedule:
     - cron: "17 */6 * * *"
@@ -27,7 +27,7 @@ jobs:
   refresh-and-deploy:
     name: Refresh and Deploy Tamil
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       GH_VARIABLES_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
@@ -53,13 +53,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "20"
 
       - name: Install workflow dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install duckdb requests beautifulsoup4 cloudscraper
-          npm install --global wrangler@4.90.1
+          npm install --global wrangler@4.81.1
 
       - name: Validate workflow configuration
         run: |
@@ -134,9 +134,9 @@ jobs:
       - name: Resolve run mode
         run: |
           set -euo pipefail
-          full_refresh="true"
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.full_refresh }}" != "true" ]]; then
-            full_refresh="false"
+          full_refresh="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.full_refresh }}" == "true" ]]; then
+            full_refresh="true"
           fi
           echo "SRUTHI_FULL_REFRESH=${full_refresh}" >> "$GITHUB_ENV"
 
@@ -256,20 +256,16 @@ jobs:
       - name: Refresh catalog from MassTamilan
         run: |
           set -euo pipefail
-          workers="$(python - <<'PY'
-          import os
-          print(max(4, os.cpu_count() or 4))
-          PY
-          )"
-          batch_size="$(( workers * 4 ))"
-          page_delay="1"
-          album_delay="1"
+          workers="1"
+          batch_size="3"
+          page_delay="8"
+          album_delay="3"
           retry_count="5"
           retry_base_delay="8"
           stop_after_known_pages="4"
           movie_index_stop_after_known_pages="45"
           echo "Refresh configuration"
-          echo "  mode = CLOUD DEPLOY REFRESH"
+          echo "  mode = FULL PAGEWISE + MOVIE INDEX SOURCE CRAWL"
           echo "  workers = ${workers}"
           echo "  batch_size = ${batch_size}"
           echo "  listing delay (s) = ${page_delay}"
@@ -278,22 +274,18 @@ jobs:
           echo "  retry base delay (s) = ${retry_base_delay}"
           echo "  stop after known pages = ${stop_after_known_pages}"
           echo "  movie index stop after known pages = ${movie_index_stop_after_known_pages}"
-
-          args=(
-            --workers "${workers}"
-            --batch-size "${batch_size}"
-            --page-delay "${page_delay}"
-            --album-delay "${album_delay}"
-            --retry-count "${retry_count}"
-            --retry-base-delay "${retry_base_delay}"
-            --stop-after-known-pages "${stop_after_known_pages}"
-            --movie-index-stop-after-known-pages "${movie_index_stop_after_known_pages}"
-          )
-          if [[ "${SRUTHI_FULL_REFRESH}" == "true" ]]; then
-            args+=(--full)
-          fi
-
-          python tools/masstamilan_refresh.py "${args[@]}"
+          echo "  include movie-index A-Z/0-9 tags = true"
+          python tools/masstamilan_refresh.py \
+            --workers "${workers}" \
+            --batch-size "${batch_size}" \
+            --page-delay "${page_delay}" \
+            --album-delay "${album_delay}" \
+            --retry-count "${retry_count}" \
+            --retry-base-delay "${retry_base_delay}" \
+            --stop-after-known-pages "${stop_after_known_pages}" \
+            --movie-index-stop-after-known-pages "${movie_index_stop_after_known_pages}" \
+            --include-tag-index \
+            --full
 
       - name: Validate refreshed local catalog files
         run: |

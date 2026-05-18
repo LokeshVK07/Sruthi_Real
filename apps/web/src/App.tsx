@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Home, Library, ListMusic, Menu, Search, Users } from "lucide-react";
+import { Bell, Clock3, Heart, Home, Library, ListMusic, Menu, MoreHorizontal, Plus, Search, Users } from "lucide-react";
 import { apiClient } from "./api";
 import { useDebounce } from "./hooks/useDebounce";
 import { normalizeSearchText } from "./searchUtils";
@@ -11,13 +11,15 @@ import RecentlyPlayed from "./components/RecentlyPlayed";
 import QueuePanel from "./components/QueuePanel";
 import PlaylistModal from "./components/PlaylistModal";
 import KeyboardShortcutsModal from "./components/KeyboardShortcutsModal";
+import AbstractCover from "./components/AbstractCover";
+import BottomPlayer from "./components/BottomPlayer";
 import MobileLayout from "./components/mobile/MobileLayout";
 import type { MobileLibrarySection } from "./components/mobile/MobileLayout";
 import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
-import { fallbackArt, heroArtworkFor, imageForAlbum, imageForSong, replaceBrokenArtwork } from "./utils/artwork";
+import { fallbackArt, imageForAlbum } from "./utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 type ViewMode = "grid" | "list";
@@ -368,18 +370,17 @@ export default function App() {
         id: "favorites",
         name: "Favorites",
         count: favoriteSongs.length,
-        coverUrl: favoriteSongs[0] ? imageForSong(favoriteSongs[0]) : null,
+        coverUrl: null,
         kind: "favorites",
       },
     ];
 
     for (const playlist of customPlaylists) {
-      const firstSong = playlist.trackIds.map((trackId) => songLookup.get(trackId)).find(Boolean) ?? null;
       cards.push({
         id: playlist.id,
         name: playlist.name,
         count: playlist.trackIds.length,
-        coverUrl: firstSong ? imageForSong(firstSong) : null,
+        coverUrl: null,
         kind: "playlist",
       });
     }
@@ -916,7 +917,7 @@ export default function App() {
     () => albumItems.find((album) => album.albumId === currentSong?.albumId) ?? null,
     [albumItems, currentSong?.albumId],
   );
-  const currentHeroArtwork = heroArtworkFor(currentSong, currentAlbumArtwork);
+  const currentHeroArtwork = "";
   const selectedAlbumFallback = useMemo<AlbumDetail | null>(() => {
     if (!selectedAlbumId) return null;
     const album = albumLookup.get(selectedAlbumId);
@@ -1422,7 +1423,7 @@ export default function App() {
             {filteredFavoriteSongs.map((song) => (
               <button key={song.id} className={viewMode === "grid" ? "recent-card" : "recent-row"} onClick={() => handleSongSelect(song, favoriteSongs)}>
                 <div className="recent-card__media">
-                  <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1452,7 +1453,7 @@ export default function App() {
                 onClick={() => handleSongSelect(song, queueFromAlbum(song.albumId, fullLibrary))}
               >
                 <div className="recent-card__media">
-                  <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1466,114 +1467,70 @@ export default function App() {
     }
 
     if (activeNav === "home" && selectedFilter === "all" && !searchQuery.trim()) {
+      const forYouCards = [
+        { title: "Nature Acoustic", subtitle: "Organic calm", song: fullLibrary[0] ?? currentSong, variant: "wave" as const },
+        { title: "Early Morning Calm", subtitle: "Soft starts", song: fullLibrary[1] ?? currentSong, variant: "rings" as const },
+        { title: "Deep Focus", subtitle: "Quiet flow", song: fullLibrary[2] ?? currentSong, variant: "dots" as const },
+        { title: "Peaceful Piano", subtitle: "Warm keys", song: fullLibrary[3] ?? currentSong, variant: "bars" as const },
+        { title: "Rainy Day Vibes", subtitle: "Gentle mood", song: fullLibrary[4] ?? currentSong, variant: "lines" as const },
+      ].filter((item): item is { title: string; subtitle: string; song: Song; variant: "wave" | "rings" | "dots" | "bars" | "lines" } => Boolean(item.song));
+      const playlistRows = uniqueById([currentSong, ...filteredRecentSongs, ...favoriteSongs, ...fullLibrary].filter(Boolean) as Song[]).slice(0, 8);
       return (
         <>
-          <RecentlyPlayed
-            title="Favorites"
-            tracks={filteredFavoriteSongs}
-            viewMode={viewMode}
-            layout="row"
-            fallbackArt={fallbackArt}
-            currentTrackId={currentSong?.id}
-            emptyHint="Tap the heart on any song to save it here."
-            onPlayTrack={(song) => handleSongSelect(song, favoriteSongs)}
-            onPrefetchTrack={(song) => requestSongPrefetch([song.id])}
-            onViewAll={() => {
-              setActiveNav("favorites");
-              setExpandedSection("favorites");
-            }}
-          />
-          <RecentlyPlayed
-            title="Recently played"
-            tracks={filteredRecentSongs}
-            viewMode={viewMode}
-            layout="row"
-            fallbackArt={fallbackArt}
-            currentTrackId={currentSong?.id}
-            onPlayTrack={(song) => handleSongSelect(song, queueFromAlbum(song.albumId, fullLibrary))}
-            onPrefetchTrack={(song) => requestSongPrefetch([song.id])}
-            onViewAll={() => setExpandedSection("recent")}
-          />
-          <section className="content-section">
+          <section className="for-you-section">
             <div className="section-header">
-              <h2>Playlists</h2>
-              <div className="section-header__actions">
-                <button className="section-link" type="button" onClick={() => setPlaylistModalOpen(true)}>
-                  + New Playlist
-                </button>
-                <button className="section-link" type="button" onClick={() => navigateDesktop("playlists")}>
-                  View all
-                </button>
-              </div>
+              <h2>For You</h2>
+              <button className="section-link" type="button" onClick={() => navigateDesktop("library")}>View all</button>
             </div>
-            <div className="playlist-grid playlist-grid--home">
-              {homePlaylistCards.map((playlist) => (
-                <div key={playlist.id} className={playlist.kind === "favorites" ? "playlist-card playlist-card--favorites" : "playlist-card"}>
-                  <button
-                    type="button"
-                    className="playlist-card__main"
-                    onClick={() => {
-                      if (playlist.kind === "favorites") {
-                        setActiveNav("favorites");
-                        setExpandedSection("favorites");
-                      } else {
-                        handleOpenPlaylistView(playlist.id);
-                      }
-                    }}
-                  >
-                    <span className={playlist.coverUrl ? "playlist-card__cover" : "playlist-card__cover playlist-card__cover--empty"}>
-                      {playlist.coverUrl ? <img src={playlist.coverUrl} alt="" loading="lazy" decoding="async" onError={replaceBrokenArtwork} /> : "♪"}
-                    </span>
-                    <strong>{playlist.name}</strong>
-                    <span>{playlist.count} songs</span>
+            <div className="for-you-grid">
+              {forYouCards.map((card) => (
+                <button key={card.title} className="for-you-card" type="button" onClick={() => handleSongSelect(card.song, fullLibrary)}>
+                  <AbstractCover seed={card.song.id || card.title} variant={card.variant} size="lg" />
+                  <span>
+                    <strong>{card.title}</strong>
+                    <small>{card.subtitle}</small>
+                  </span>
+                  <span className="for-you-card__play">▶</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="content-section playlist-section">
+            <div className="section-header">
+              <h2>Your Playlist</h2>
+              <button className="section-link section-link--pill" type="button" onClick={() => setPlaylistModalOpen(true)}>
+                <Plus size={17} /> Add
+              </button>
+            </div>
+            <div className="playlist-table">
+              <div className="playlist-table__head">
+                <span>#</span>
+                <span />
+                <span>Title</span>
+                <span>Artist</span>
+                <span>Album</span>
+                <span />
+                <span><Clock3 size={15} /></span>
+                <span />
+              </div>
+              {playlistRows.map((song, index) => (
+                <div key={song.id} className={song.id === currentSong?.id ? "playlist-row is-active" : "playlist-row"}>
+                  <span>{index + 1}</span>
+                  <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                  <button type="button" onClick={() => handleSongSelect(song, playlistRows)}>{song.title}</button>
+                  <span>{song.artist}</span>
+                  <span>{song.albumTitle}</span>
+                  <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
+                    <Heart size={17} fill={song.favorite ? "currentColor" : "none"} />
                   </button>
-                  {playlist.kind === "playlist" ? (
-                    <div className="playlist-card__actions">
-                      <button type="button" onClick={() => handleRenamePlaylist(playlist.id)}>Rename</button>
-                      <button type="button" onClick={() => handleDeletePlaylist(playlist.id)}>Delete</button>
-                    </div>
-                  ) : null}
+                  <span>{safeDuration(song) ? `${Math.floor(safeDuration(song) / 60)}:${String(safeDuration(song) % 60).padStart(2, "0")}` : "—:—"}</span>
+                  <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                    <MoreHorizontal size={18} />
+                  </button>
                 </div>
               ))}
             </div>
           </section>
-          {homeComposerCards.length ? (
-            <section className="content-section">
-              <div className="section-header">
-                <h2>Top composers</h2>
-                <button className="section-link" type="button" onClick={() => navigateDesktop("artists")}>
-                  View all
-                </button>
-              </div>
-              <div className="composer-grid">
-                {homeComposerCards.map((composer) => (
-                  <button
-                    key={composer.slug}
-                    className="composer-card"
-                    type="button"
-                    onClick={() => {
-                      setSelectedComposerSlug(composer.slug);
-                      setActiveNav("artists");
-                      setMobileTab("library");
-                      setMobileLibrarySection("artists");
-                    }}
-                  >
-                    <div className="composer-card__media">
-                      {composer.coverUrl ? (
-                        <img src={composer.coverUrl} alt={composer.name} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
-                      ) : (
-                        <span className="composer-card__monogram">{composer.name.charAt(0)}</span>
-                      )}
-                    </div>
-                    <div className="composer-card__copy">
-                      <strong title={composer.name}>{composer.name}</strong>
-                      <span>{composer.songCount} songs · {composer.albumCount} albums</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </>
       );
     }
@@ -1598,7 +1555,7 @@ export default function App() {
               {selectedAlbumForView.songs.map((song) => (
                 <div key={song.id} className="track-row">
                   <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
-                    <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1631,7 +1588,7 @@ export default function App() {
                   handleOpenAlbumView(album.albumId);
                 }}
               >
-                <img src={imageForAlbum(album)} alt={album.name} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                <AbstractCover seed={album.albumId || album.name} size="md" />
                 <div>
                   <strong>{album.name}</strong>
                   <span>{album.musicDirector || album.singersSummary || "Tamil soundtrack"}</span>
@@ -1666,7 +1623,7 @@ export default function App() {
                     onMouseEnter={() => requestSongPrefetch([song.id])}
                     onClick={() => handleSongSelect(song, composerSongs)}
                   >
-                    <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1706,11 +1663,7 @@ export default function App() {
                   onClick={() => setSelectedComposerSlug(composer.slug)}
                 >
                   <div className="composer-card__media">
-                    {composer.coverUrl ? (
-                      <img src={composer.coverUrl} alt={composer.name} onError={replaceBrokenArtwork} />
-                    ) : (
-                      <span className="composer-card__monogram">{composer.name.charAt(0)}</span>
-                    )}
+                    <AbstractCover seed={composer.slug || composer.name} size="sm" variant="rings" />
                   </div>
                   <div className="composer-card__copy">
                     <strong title={composer.name}>{composer.name}</strong>
@@ -1751,7 +1704,7 @@ export default function App() {
                 {selectedPlaylistSongs.map((song) => (
                   <div key={song.id} className="track-row">
                     <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
-                      <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                      <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                       <div>
                         <strong>{song.title}</strong>
                         <span>{song.artist}</span>
@@ -1776,7 +1729,7 @@ export default function App() {
                   className="playlist-card"
                 >
                   <button type="button" className="playlist-card__main" onClick={() => handleOpenPlaylistView(playlist.id)}>
-                    <span className="playlist-card__cover playlist-card__cover--empty">♪</span>
+                    <AbstractCover seed={playlist.id || playlist.name} size="sm" variant="leaf" />
                     <strong>{playlist.name}</strong>
                     <span>{playlist.count} songs</span>
                   </button>
@@ -1802,7 +1755,7 @@ export default function App() {
           {filteredSongs.slice(0, 24).map((song) => (
             <div key={song.id} className="track-row">
               <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, filteredSongs)}>
-                <img src={imageForSong(song)} alt={song.title} loading="lazy" decoding="async" onError={replaceBrokenArtwork} />
+                <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                 <div>
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -2065,8 +2018,20 @@ export default function App() {
                   <Menu size={18} />
                 </button>
                 <div className="mobile-header__brand">
-                  <img src="/Sruthi_kutty.jpg" alt={APP_NAME} />
+                  <AbstractCover seed={APP_NAME} size="xs" variant="leaf" />
                   <strong>{APP_NAME}</strong>
+                </div>
+              </div>
+
+              <div className="top-bar">
+                {desktopSearchBar}
+                <div className="top-bar__actions">
+                  <button className="top-bar__icon" type="button" aria-label="Notifications">
+                    <Bell size={20} />
+                  </button>
+                  <button className="top-bar__profile" type="button" aria-label="Profile">
+                    V
+                  </button>
                 </div>
               </div>
 
@@ -2115,12 +2080,36 @@ export default function App() {
                 onShare={handleShareCurrentSong}
               />
 
-              {activeNav === "home" && selectedFilter === "all" && !searchQuery.trim() ? null : desktopSearchBar}
-
               {centerResults}
             </main>
 
             {desktopQueueOpen ? desktopQueuePanel : null}
+
+            <BottomPlayer
+              song={currentSong}
+              isPlaying={playing}
+              isShuffleOn={shuffle}
+              repeatMode={repeatMode}
+              isMuted={isMuted}
+              volume={volume}
+              currentTime={currentTime}
+              duration={duration || currentSong?.durationSeconds || 0}
+              onPlayPause={handlePlayPauseToggle}
+              onPrevious={handlePreviousTrack}
+              onNext={handleNextTrack}
+              onToggleShuffle={toggleShuffle}
+              onCycleRepeat={cycleRepeatMode}
+              onToggleFavorite={() => currentSong && toggleFavorite.mutate(currentSong.id)}
+              onToggleMute={handleToggleMute}
+              onVolumeChange={handleVolumeChange}
+              onSeek={(value) => {
+                setCurrentTime(value);
+                const activeDeck = getActiveDeck();
+                if (activeDeck) activeDeck.currentTime = value;
+              }}
+              onToggleQueue={() => setDesktopQueueOpen((open) => !open)}
+              onOpenMenu={() => setHeroMenuOpen((open) => !open)}
+            />
 
             {desktopPlaylistModal}
           </div>

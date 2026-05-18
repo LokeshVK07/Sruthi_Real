@@ -364,12 +364,14 @@
     doc.querySelectorAll("a[href]").forEach((link) => {
       const href = cleanText(link.getAttribute("href"));
       if (!href) return;
-      if (href.includes("/browse-by-year/")) {
-        paths.push(toAbsolute(href));
+      const absolute = toAbsolute(href);
+      const path = new URL(absolute, location.origin).pathname;
+      if (path.includes("/browse-by-year/")) {
+        paths.push(absolute);
         return;
       }
-      if (INCLUDE_TAG_INDEX && href.startsWith("/tag/")) {
-        paths.push(toAbsolute(href));
+      if (INCLUDE_TAG_INDEX && /^\/tag\/[a-z0-9]\/?$/i.test(path)) {
+        paths.push(absolute);
       }
     });
     return uniqueBy(paths.filter(Boolean), (item) => item);

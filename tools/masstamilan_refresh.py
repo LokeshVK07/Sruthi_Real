@@ -75,9 +75,11 @@ def parse_args():
     parser.add_argument("--retry-count", type=int, default=3)
     parser.add_argument("--retry-base-delay", type=float, default=1.0)
     parser.add_argument("--stop-after-known-pages", type=int, default=2)
+    parser.add_argument("--skip-listing", action="store_true")
     parser.add_argument("--skip-movie-index", action="store_true")
     parser.add_argument("--include-tag-index", action="store_true")
     parser.add_argument("--movie-index-stop-after-known-pages", type=int, default=120)
+    parser.add_argument("--album-url", action="append", default=[], help="Refresh a specific album URL. Can be passed more than once.")
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--print-summary-only", action="store_true")
     return parser.parse_args()
@@ -343,11 +345,13 @@ def parse_movie_index_entry_paths(html, include_tag_index=False):
         href = clean_text(link.get("href"))
         if not href:
             continue
-        if "/browse-by-year/" in href:
-            paths.append(to_absolute(href))
+        absolute = to_absolute(href)
+        parsed_path = urlparse(absolute or href).path
+        if "/browse-by-year/" in parsed_path:
+            paths.append(absolute)
             continue
-        if include_tag_index and href.startswith("/tag/"):
-            paths.append(to_absolute(href))
+        if include_tag_index and re.fullmatch(r"/tag/[a-z0-9](?:/)?", parsed_path, re.I):
+            paths.append(absolute)
     return unique_by([path for path in paths if path], lambda item: item)
 
 
@@ -741,10 +745,26 @@ def main():
 
     session = make_session()
     processed_urls = load_processed_urls()
-    listing_album_seeds, total_pages = build_album_seeds(session, args, processed_urls)
-    movie_index_album_seeds = build_movie_index_album_seeds(session, args, processed_urls)
-    album_seeds = unique_by(listing_album_seeds + movie_index_album_seeds, lambda item: item["url"])
-    remaining = album_seeds if args.full else [album for album in album_seeds if album["url"] not in processed_urls]
+    if args.album_url:
+        listing_album_seeds, total_pages = [], 0
+        movie_index_album_seeds = []
+        album_seeds = [
+            make_seed(urlparse(to_absolute(album_url)).path.rsplit("/", 1)[-1], album_url)
+            for album_url in args.album_url
+            if to_absolute(album_url)
+        ]
+        remaining = unique_by([album for album in album_seeds if album], lambda item: item["url"])
+    else:
+        if args.skip_listing:
+            listing_album_seeds, total_pages = [], 0
+        else:
+            listing_album_seeds, total_pages = build_album_seeds(session, args, processed_urls)
+        movie_index_album_seeds = build_movie_index_album_seeds(session, args, processed_urls)
+        album_seeds = unique_by(listing_album_seeds + movie_index_album_seeds, lambda item: item["url"])
+        remaining = album_seeds if args.full else [album for album in album_seeds if album["url"] not in processed_urls]
+
+    if args.skip_listing:
+        listing_album_seeds, total_pages = [], 0
 
     print(
         json.dumps(

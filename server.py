@@ -991,6 +991,25 @@ def upsert_album_into_db(album_payload):
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("DELETE FROM download_links WHERE song_id IN (SELECT id FROM songs WHERE album_url = ?)", (album_url,))
         connection.execute("DELETE FROM songs WHERE album_url = ?", (album_url,))
+        used_song_ids = {
+            row["id"]
+            for row in connection.execute("SELECT id FROM songs WHERE album_url != ?", (album_url,)).fetchall()
+            if clean_text(row["id"])
+        }
+        seen_song_ids = set()
+        for index, song in enumerate(songs_payload, start=1):
+            base_id = clean_text(song.get("id")) or f"{album_url}-{index}"
+            candidate = base_id
+            if candidate in used_song_ids or candidate in seen_song_ids:
+                suffix_source = clean_text(song.get("sourceUrl")) or clean_text(song.get("title")) or str(index)
+                suffix = re.sub(r"[^a-z0-9]+", "-", suffix_source.lower()).strip("-") or str(index)
+                candidate = f"{base_id}-{suffix}"
+                counter = 2
+                while candidate in used_song_ids or candidate in seen_song_ids:
+                    candidate = f"{base_id}-{suffix}-{counter}"
+                    counter += 1
+            song["id"] = candidate
+            seen_song_ids.add(candidate)
         connection.execute(
             """
             INSERT OR REPLACE INTO albums (
@@ -1913,6 +1932,7 @@ class CatalogHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
@@ -2510,7 +2530,7 @@ class CatalogHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ensure_index()
     server = ThreadingHTTPServer(("127.0.0.1", 8000), CatalogHandler)
     print("Tamil Music Vault server running on http://127.0.0.1:8000")
+    threading.Thread(target=ensure_index, daemon=True).start()
     server.serve_forever()

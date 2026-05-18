@@ -65,7 +65,7 @@ export default function SearchFilterBar({
     <section className="search-filter-bar">
       <label className="search-filter-bar__input">
         <Search size={16} />
-        <input ref={inputRef} value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search tracks, albums, artists..." />
+        <input ref={inputRef} value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search for songs, artists, albums..." />
       </label>
 
       <div className="search-filter-bar__actions">
