@@ -256,10 +256,10 @@ jobs:
       - name: Refresh catalog from MassTamilan
         run: |
           set -euo pipefail
-          workers="1"
-          batch_size="3"
-          page_delay="8"
-          album_delay="3"
+          workers="4"
+          batch_size="16"
+          page_delay="1"
+          album_delay="1"
           retry_count="5"
           retry_base_delay="8"
           stop_after_known_pages="4"
