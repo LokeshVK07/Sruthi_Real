@@ -67,11 +67,11 @@ export default function QueuePanel({ queue, fallbackArt: _fallbackArt, currentSo
               }}
             >
               <button className="queue-item__main" onClick={() => onPlay(song)}>
-                {song.id === currentSongId ? (
-                  <span className="queue-item__playing">
+                <span className="queue-item__playing" aria-hidden="true">
+                  {song.id === currentSongId ? (
                     <Play size={10} fill="currentColor" />
-                  </span>
-                ) : null}
+                  ) : null}
+                </span>
                 <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSongId} />
                 <div className="queue-item__copy">
                   <strong title={song.title}>{song.title}</strong>
