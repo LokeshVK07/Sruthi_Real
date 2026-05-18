@@ -218,11 +218,19 @@ export default function App() {
     queryKey: ["songs"],
     queryFn: apiClient.songs,
     staleTime: 1000 * 60 * 10,
+    enabled:
+      activeNav === "library" ||
+      activeNav === "search" ||
+      activeNav === "favorites" ||
+      activeNav === "playlists" ||
+      selectedFilter === "tracks" ||
+      Boolean(selectedPlaylistId),
   });
   const { data: albums } = useQuery<{ items: Album[] }>({
     queryKey: ["albums"],
     queryFn: apiClient.albums,
     staleTime: 1000 * 60 * 10,
+    enabled: activeNav === "albums" || selectedFilter === "albums" || Boolean(selectedAlbumId),
   });
   const { data: favorites } = useQuery<{ items: Song[] }>({
     queryKey: ["favorites"],
@@ -253,6 +261,7 @@ export default function App() {
     queryKey: ["composers"],
     queryFn: apiClient.composers,
     staleTime: 1000 * 60 * 60,
+    enabled: activeNav === "artists" || selectedFilter === "artists" || Boolean(selectedComposerSlug),
   });
   const { data: composerDetail } = useQuery<ComposerDetail>({
     queryKey: ["composer", selectedComposerSlug],
@@ -635,9 +644,6 @@ export default function App() {
 
   const recordPlayback = useMutation<{ ok: boolean }, Error, string>({
     mutationFn: () => apiClient.recordPlayback(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["home"] });
-    }
   });
   const prefetchRelated = useMutation<{ queued: number }, Error, string>({ mutationFn: (songId: string) => apiClient.prefetchRelated(songId) });
   const prefetchSongs = useMutation<{ queued: number }, Error, string[]>({ mutationFn: (songIds: string[]) => apiClient.prefetchSongs(songIds) });
@@ -682,6 +688,7 @@ export default function App() {
   useEffect(() => {
     const snapshotQueue = readStoredTracks(QUEUE_SNAPSHOT_KEY, 100);
     if (!snapshotQueue.length) return;
+    queueHydratedRef.current = true;
     setQueue(snapshotQueue, 0, false);
     const firstPlayable = snapshotQueue[0];
     if (firstPlayable) {

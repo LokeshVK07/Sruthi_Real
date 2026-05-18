@@ -60,8 +60,17 @@ const RECENTLY_PLAYED_STORAGE_KEY = "sruthi_recently_played";
 const LIBRARY_CACHE_TTL_MS = 15_000;
 const LIBRARY_PAGE_SIZE = 5000;
 const MAX_LIBRARY_PAGES = 20;
+const HOME_LIBRARY_LIMIT = 120;
+const DEFAULT_LIBRARY_LIMIT = 240;
 
 let libraryCache:
+  | {
+      loadedAt: number;
+      promise: Promise<Song[]>;
+    }
+  | null = null;
+
+let homeLibraryCache:
   | {
       loadedAt: number;
       promise: Promise<Song[]>;
@@ -226,6 +235,40 @@ async function fetchLegacyLibrary(force = false): Promise<Song[]> {
   return promise;
 }
 
+async function fetchLibraryPage(limit = DEFAULT_LIBRARY_LIMIT, query = ""): Promise<Song[]> {
+  const favorites = favoriteIds();
+  const params = new URLSearchParams({
+    query,
+    decade: "all",
+    mood: "all",
+    offset: "0",
+    limit: String(limit),
+  });
+  const payload = await api<LegacyLibraryResponse>(`/api/library?${params.toString()}`);
+  return payload.songs.map((song) => normalizeSong(song, favorites));
+}
+
+async function fetchHomeLibrary(): Promise<Song[]> {
+  const now = Date.now();
+  if (homeLibraryCache && now - homeLibraryCache.loadedAt < LIBRARY_CACHE_TTL_MS) {
+    return homeLibraryCache.promise;
+  }
+  const promise = fetchLibraryPage(HOME_LIBRARY_LIMIT);
+  homeLibraryCache = { loadedAt: now, promise };
+  return promise;
+}
+
+async function fetchSongsByIds(ids: string[]): Promise<Song[]> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return [];
+  const favorites = favoriteIds();
+  const payload = await api<{ songs: LegacySong[] }>("/api/songs-batch", {
+    method: "POST",
+    body: JSON.stringify({ ids: uniqueIds.slice(0, 1200) }),
+  });
+  return (payload.songs ?? []).map((song) => normalizeSong(song, favorites));
+}
+
 function filterSongs(songs: Song[], query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return songs;
@@ -282,16 +325,22 @@ async function currentStatus(): Promise<LegacyAppState> {
 
 export const apiClient = {
   home: async (): Promise<HomeResponse> => {
-    const [library, state] = await Promise.all([fetchLegacyLibrary(), currentStatus()]);
+    const [library, state] = await Promise.all([fetchHomeLibrary(), currentStatus()]);
     const favoritesSet = favoriteIds();
-    const favorites = library.filter((song) => favoritesSet.has(song.id));
-    const recent = readRecentlyPlayed()
-      .map((item) => library.find((song) => song.id === item.id) || item)
+    const storedRecent = readRecentlyPlayed();
+    const storedFavoriteIds = [...favoritesSet];
+    const hydratedStoredSongs = await fetchSongsByIds([...storedRecent.map((song) => song.id), ...storedFavoriteIds]);
+    const hydratedLookup = new Map(hydratedStoredSongs.map((song) => [song.id, song]));
+    const favorites = storedFavoriteIds
+      .map((songId) => hydratedLookup.get(songId) || library.find((song) => song.id === songId))
+      .filter((song): song is Song => Boolean(song));
+    const recent = storedRecent
+      .map((item) => hydratedLookup.get(item.id) || library.find((song) => song.id === item.id) || item)
       .filter((song): song is Song => Boolean(song));
     return {
       heroGreeting: "Now playing from your Tamil vault",
       recentlyPlayed: recent,
-      library: library.slice(0, 120),
+      library,
       favorites,
       artists: groupArtists(library).slice(0, 24),
       stats: {
@@ -301,7 +350,7 @@ export const apiClient = {
     };
   },
   songs: async (): Promise<{ items: Song[] }> => {
-    const items = await fetchLegacyLibrary();
+    const items = await fetchLibraryPage(DEFAULT_LIBRARY_LIMIT);
     return { items };
   },
   albums: async (): Promise<{ items: Album[] }> => {
@@ -326,12 +375,11 @@ export const apiClient = {
     return { items };
   },
   favorites: async (): Promise<{ items: Song[] }> => {
-    const library = await fetchLegacyLibrary();
-    const favs = favoriteIds();
-    return { items: library.filter((song) => favs.has(song.id)) };
+    const favs = [...favoriteIds()];
+    return { items: await fetchSongsByIds(favs) };
   },
   search: async (q: string): Promise<{ items: Song[] }> => {
-    const items = filterSongs(await fetchLegacyLibrary(), q).slice(0, 50);
+    const items = await fetchLibraryPage(50, q.trim().toLowerCase());
     return { items };
   },
   searchAll: async (
@@ -344,18 +392,16 @@ export const apiClient = {
     artists: Array<{ artist: string; songCount: number }>;
     composers: ComposerCollection[];
   }> => {
-    const library = await fetchLegacyLibrary();
-    const tracks = filterSongs(library, q).slice(0, Math.max(limit, 12));
+    const tracks = await fetchLibraryPage(Math.max(limit, 12), q.trim().toLowerCase());
     const albums = normalizeAlbumSongs(tracks).slice(0, 12);
     const artists = groupArtists(tracks).slice(0, 12);
     const composers = groupComposers(tracks).slice(0, 12);
     return { query: q, tracks, albums, artists, composers };
   },
   toggleFavorite: async (songId: string): Promise<{ active: boolean }> => {
-    const library = await fetchLegacyLibrary();
     const current = readStorage<StoredFavorite[]>(FAVORITES_KEY, []);
     const exists = current.some((item) => item.id === songId);
-    const song = library.find((item) => item.id === songId);
+    const song = (await fetchSongsByIds([songId]))[0];
     const next = exists
       ? current.filter((item) => item.id !== songId)
       : [{ id: songId, title: song?.title, composer: song?.composer ?? undefined }, ...current];
@@ -410,7 +456,7 @@ export const apiClient = {
   },
   refreshCheck: async (): Promise<RefreshStatus> => apiClient.refreshStatus(),
   prefetchAlbum: async (albumId: string, leadLimit = 4, refreshLinks = false) => {
-    const library = await fetchLegacyLibrary();
+    const library = homeLibraryCache ? await homeLibraryCache.promise : [];
     const leadSong = library.find((song) => song.albumId === albumId);
     if (!leadSong) return { ok: false, queued: 0, songCount: 0 };
     const payload = await api<{ ok: boolean; queuedSongs?: number; albumSongCount?: number }>("/api/prefetch/album", {
@@ -439,5 +485,6 @@ export const apiClient = {
   },
   invalidateLibraryCache() {
     libraryCache = null;
+    homeLibraryCache = null;
   },
 };
