@@ -1,6 +1,7 @@
 import { Trash2, X, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import type { Song } from "../../types";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type MobileQueueSheetProps = {
   open: boolean;
@@ -13,13 +14,6 @@ type MobileQueueSheetProps = {
   onRemove: (songId: string) => void;
   onMove: (from: number, to: number) => void;
 };
-
-function formatTime(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return "—:—";
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${String(secs).padStart(2, "0")}`;
-}
 
 export default function MobileQueueSheet({
   open,
@@ -50,13 +44,12 @@ export default function MobileQueueSheet({
           {queue.map((song, index) => (
             <div key={`${song.id}-${index}`} className={song.id === currentSongId ? "mobile-queue-row is-active" : "mobile-queue-row"}>
               <button type="button" className="mobile-queue-row__main" onClick={() => onPlay(song)}>
-                <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
                 <div className="mobile-queue-row__copy">
                   <strong title={song.title}>{song.title}</strong>
                   <span title={song.artist}>{song.artist}</span>
                 </div>
               </button>
-              <span className="mobile-queue-row__duration">{formatTime(song.durationSeconds)}</span>
               <div className="mobile-queue-row__actions">
                 <button type="button" onClick={() => onMove(index, Math.max(0, index - 1))} aria-label="Move up">
                   <ChevronUp size={14} />

@@ -610,12 +610,6 @@
   text-align: left;
 }
 
-.mobile-queue-row__duration {
-  min-width: 38px;
-  color: var(--text-soft);
-  text-align: right;
-}
-
 .mobile-queue-row__actions button {
   min-width: 36px;
   min-height: 36px;

@@ -126,7 +126,7 @@ export default function NowPlayingHero({
     <section className="hero-card">
       <div className="hero">
         <div className="hero__cover-wrap">
-          <AbstractCover seed={song?.id || song?.title} size="hero" variant="wave" active={isPlaying} />
+          <AbstractCover src={artwork} alt={song?.title ?? "Now playing"} seed={song?.id || song?.title} size="hero" variant="wave" active={isPlaying} />
         </div>
 
         <div className="hero__body">

@@ -15,6 +15,7 @@ import MobileQueueSheet from "./MobileQueueSheet";
 import MobileRefreshStatusSheet from "./MobileRefreshStatusSheet";
 import MobileSearch from "./MobileSearch";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 export type MobileLibrarySection = "favorites" | "playlists" | "albums" | "artists" | "recent";
 
@@ -329,7 +330,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
           <div className="mobile-recent-list">
             {favorites.map((song) => (
               <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, favorites)}>
-                <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
                 <div className="mobile-song-row__copy">
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -351,7 +352,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
           <div className="mobile-recent-list">
             {recentlyPlayed.map((song) => (
               <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song)}>
-                <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
                 <div className="mobile-song-row__copy">
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>

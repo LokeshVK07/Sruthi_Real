@@ -1,6 +1,7 @@
 import { ChevronUp, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import type { Song } from "../../types";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type MobileMiniPlayerProps = {
   song: Song;
@@ -30,7 +31,7 @@ export default function MobileMiniPlayer({
   return (
     <div className="mobile-mini-player">
       <button type="button" className="mobile-mini-player__main" onClick={onOpenPlayer}>
-        <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
+        <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
         <div className="mobile-mini-player__copy">
           <strong title={song.title}>{song.title}</strong>
           <span title={song.artist}>{song.artist}</span>

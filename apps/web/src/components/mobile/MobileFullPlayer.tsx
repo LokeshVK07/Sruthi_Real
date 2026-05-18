@@ -15,6 +15,7 @@ import {
 import type { Song } from "../../types";
 import type { RepeatMode } from "../../store";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type MobileFullPlayerProps = {
   open: boolean;
@@ -107,7 +108,7 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
           </button>
         </div>
 
-        <AbstractCover seed={song.id || song.title} size="hero" className="mobile-full-player__artwork" />
+        <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="hero" className="mobile-full-player__artwork" />
 
         <div className="mobile-full-player__copy">
           <strong title={song.title}>{song.title}</strong>

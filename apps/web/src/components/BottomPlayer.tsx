@@ -3,6 +3,7 @@ import { Heart, ListMusic, Maximize2, MoreHorizontal, Pause, Play, Repeat, Shuff
 import type { Song } from "../types";
 import type { RepeatMode } from "../store";
 import AbstractCover from "./AbstractCover";
+import { imageForSong } from "../utils/artwork";
 
 type BottomPlayerProps = {
   song: Song | null;
@@ -62,7 +63,7 @@ export default function BottomPlayer({
   return (
     <footer className="bottom-player">
       <div className="bottom-player__track">
-        <AbstractCover seed={song?.id || song?.title} size="sm" variant="wave" active={isPlaying} />
+        <AbstractCover src={song ? imageForSong(song) : null} alt={song?.title ?? ""} seed={song?.id || song?.title} size="sm" variant="wave" active={isPlaying} />
         <div className="bottom-player__copy">
           <strong title={song?.title}>{song?.title ?? "Pick a song"}</strong>
           <span title={song?.artist}>{song?.artist ?? "Your Tamil vault"}</span>

@@ -1,3 +1,6 @@
+import type { CSSProperties } from "react";
+import { fallbackArt } from "../utils/artwork";
+
 type AbstractCoverVariant = "wave" | "bars" | "rings" | "dots" | "lines" | "leaf";
 type AbstractCoverSize = "xs" | "sm" | "md" | "lg" | "hero";
 
@@ -6,6 +9,8 @@ type AbstractCoverProps = {
   size?: AbstractCoverSize;
   active?: boolean;
   seed?: string | number | null;
+  src?: string | null;
+  alt?: string;
   className?: string;
 };
 
@@ -25,15 +30,28 @@ export function pickCoverVariant(seed?: string | number | null) {
   return variants[hashSeed(seed) % variants.length];
 }
 
-export default function AbstractCover({ variant, size = "md", active = false, seed, className = "" }: AbstractCoverProps) {
+export default function AbstractCover({ variant, size = "md", active = false, seed, src, alt = "", className = "" }: AbstractCoverProps) {
   const resolvedVariant = variant ?? pickCoverVariant(seed);
   const offset = hashSeed(seed) % 19;
+  const imageSrc = src && src.trim() ? src : "";
   const classes = ["abstract-cover", `abstract-cover--${resolvedVariant}`, `abstract-cover--${size}`, active ? "is-active" : "", className]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <span className={classes} aria-hidden="true" style={{ "--cover-shift": `${offset}px` } as CSSProperties}>
+    <span className={classes} aria-hidden={alt ? undefined : "true"} style={{ "--cover-shift": `${offset}px` } as CSSProperties}>
+      {imageSrc ? (
+        <img
+          className="abstract-cover__image"
+          src={imageSrc}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onError={(event) => {
+            if (event.currentTarget.src !== fallbackArt) event.currentTarget.src = fallbackArt;
+          }}
+        />
+      ) : null}
       {resolvedVariant === "bars" ? (
         <span className="abstract-cover__bars">
           {Array.from({ length: 9 }).map((_, index) => (
@@ -70,4 +88,3 @@ export default function AbstractCover({ variant, size = "md", active = false, se
     </span>
   );
 }
-import type { CSSProperties } from "react";

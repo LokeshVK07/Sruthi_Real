@@ -2,6 +2,7 @@ import { ChevronRight, Heart, ListMusic, Play, Plus, RefreshCw, Search, Settings
 import AppLogo from "../AppLogo";
 import type { RefreshStatus, Song } from "../../types";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 
@@ -158,7 +159,7 @@ export default function MobileHome({
                 onClick={() => onPlayTrack(track)}
                 onMouseEnter={() => onPrefetchTrack?.(track)}
               >
-                <AbstractCover seed={track.id || track.title} size="sm" className="mobile-artwork" />
+                <AbstractCover src={imageForSong(track)} alt={track.title} seed={track.id || track.title} size="sm" className="mobile-artwork" />
                 <div className="mobile-song-row__copy">
                   <strong title={track.title}>{track.title}</strong>
                   <span title={track.artist}>{track.artist}</span>

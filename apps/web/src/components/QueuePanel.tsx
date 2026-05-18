@@ -2,6 +2,7 @@ import { GripVertical, Play } from "lucide-react";
 import { useState } from "react";
 import type { Song } from "../types";
 import AbstractCover from "./AbstractCover";
+import { imageForSong } from "../utils/artwork";
 
 type QueuePanelProps = {
   queue: Song[];
@@ -12,15 +13,7 @@ type QueuePanelProps = {
   onClear: () => void;
 };
 
-function formatTime(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return "—:—";
-  const value = seconds;
-  const mins = Math.floor(value / 60);
-  const secs = Math.floor(value % 60);
-  return `${mins}:${String(secs).padStart(2, "0")}`;
-}
-
-export default function QueuePanel({ queue, fallbackArt, currentSongId, onPlay, onReorder, onClear }: QueuePanelProps) {
+export default function QueuePanel({ queue, fallbackArt: _fallbackArt, currentSongId, onPlay, onReorder, onClear }: QueuePanelProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
@@ -79,15 +72,12 @@ export default function QueuePanel({ queue, fallbackArt, currentSongId, onPlay, 
                     <Play size={10} fill="currentColor" />
                   </span>
                 ) : null}
-                <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSongId} />
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSongId} />
                 <div className="queue-item__copy">
                   <strong title={song.title}>{song.title}</strong>
                   <span title={song.artist}>{song.artist}</span>
                 </div>
               </button>
-              <span className={song.durationSeconds && song.durationSeconds > 0 ? "queue-item__duration" : "queue-item__duration is-empty"}>
-                {formatTime(song.durationSeconds)}
-              </span>
               <button
                 type="button"
                 className="queue-item__handle"
