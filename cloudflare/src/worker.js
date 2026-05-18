@@ -628,6 +628,69 @@ async function handleApi(request, env, url, ctx) {
     return json(rowToSong(row));
   }
 
+  if (url.pathname === "/api/albums") {
+    const query = cleanText(url.searchParams.get("query")).toLowerCase();
+    const bindings = [];
+    const filters = [];
+    if (query) {
+      filters.push("(lower(title) LIKE ? OR lower(music_director) LIKE ? OR CAST(year AS TEXT) LIKE ?)");
+      const like = `%${query}%`;
+      bindings.push(like, like, like);
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    const rows = await env.DB.prepare(
+      `
+      SELECT
+        albums.url, albums.title, albums.year, albums.music_director,
+        albums.track_count, albums.updated_at,
+        (
+          SELECT image_url
+          FROM songs
+          WHERE songs.album_url = albums.url AND coalesce(image_url, '') != ''
+          LIMIT 1
+        ) AS image_url
+      FROM albums
+      ${whereClause}
+      ORDER BY year DESC, lower(title) ASC
+      LIMIT 6000
+      `,
+    ).bind(...bindings).all();
+    return json({ items: (rows.results || []).map(rowToAlbum) });
+  }
+
+  if (url.pathname === "/api/album") {
+    const albumId = cleanText(url.searchParams.get("id"));
+    if (!albumId) return json({ error: "Album id is required." }, 400);
+    const rows = await env.DB.prepare(
+      `
+      SELECT
+        albums.url, albums.title, albums.year, albums.music_director,
+        albums.track_count, albums.updated_at,
+        (
+          SELECT image_url
+          FROM songs
+          WHERE songs.album_url = albums.url AND coalesce(image_url, '') != ''
+          LIMIT 1
+        ) AS image_url
+      FROM albums
+      ORDER BY year DESC, lower(title) ASC
+      `,
+    ).all();
+    const album = (rows.results || []).map(rowToAlbum).find((item) => item.albumId === albumId || item.albumUrl === albumId);
+    if (!album) return json({ error: "Album not found." }, 404);
+    const songRows = await env.DB.prepare(
+      `
+      SELECT id, album_url, title, artist, composer, movie, year, mood,
+             song_page_url, source_url, image_url, audio_128_url, audio_320_url,
+             remote_audio_128_url, remote_audio_320_url, last_refreshed_at, link_status, updated_at
+      FROM songs
+      WHERE album_url = ?
+      ORDER BY lower(title) ASC
+      `,
+    ).bind(album.albumUrl).all();
+    return json({ ...album, songs: (songRows.results || []).map(rowToSong) });
+  }
+
   if (url.pathname === "/api/songs-batch" && request.method === "POST") {
     const payload = await request.json().catch(() => ({}));
     const ids = Array.isArray(payload?.ids) ? [...new Set(payload.ids.map(cleanText).filter(Boolean))].slice(0, 1200) : [];
@@ -2010,6 +2073,36 @@ function rowToSong(row) {
     updatedAt: row.updated_at || row.last_refreshed_at || null,
     lastRefreshedAt: row.last_refreshed_at || null,
     linkStatus: row.link_status || "unknown",
+  };
+}
+
+function cleanAlbumTitle(value) {
+  return cleanText(value)
+    .replace(/\s+Tamil\s+mp3\s+songs\s+download\s+MassTamilan\.com\s*$/i, "")
+    .replace(/\s+MassTamilan\.com\s*$/i, "")
+    .trim();
+}
+
+function rowToAlbum(row) {
+  const albumUrl = absoluteUrl(row.url, SITE_ORIGIN);
+  const title = cleanAlbumTitle(row.title) || cleanText(row.title) || "Unknown album";
+  const artwork = absoluteUrl(row.image_url, albumUrl);
+  return {
+    albumId: slugValue(albumUrl),
+    albumUrl,
+    name: title,
+    year: Number(row.year || 0) || null,
+    musicDirector: cleanText(row.music_director) || null,
+    singersSummary: null,
+    imageUrl: artwork || null,
+    coverUrl: artwork || null,
+    artworkUrl: artwork || null,
+    albumArtUrl: artwork || null,
+    thumbnail: null,
+    album_art: null,
+    language: "Tamil",
+    trackCount: Number(row.track_count || 0),
+    updatedAt: row.updated_at || null,
   };
 }
 

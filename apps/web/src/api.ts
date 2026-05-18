@@ -354,16 +354,15 @@ export const apiClient = {
     return { items };
   },
   albums: async (): Promise<{ items: Album[] }> => {
-    const items = normalizeAlbumSongs(await fetchLegacyLibrary());
-    return { items };
+    return api<{ items: Album[] }>("/api/albums");
   },
   album: async (albumId: string): Promise<AlbumDetail> => {
-    const songs = (await fetchLegacyLibrary()).filter((song) => song.albumId === albumId);
-    const album = normalizeAlbumSongs(songs)[0];
-    if (!album) {
-      throw new Error("Album not found");
-    }
-    return { ...album, songs };
+    const album = await api<Omit<AlbumDetail, "songs"> & { songs: LegacySong[] }>(`/api/album?id=${encodeURIComponent(albumId)}`);
+    const favorites = favoriteIds();
+    return {
+      ...album,
+      songs: album.songs.map((song) => normalizeSong(song, favorites)),
+    };
   },
   playlists: async (): Promise<{ items: Playlist[] }> => {
     const items = readPlaylists().map((playlist) => ({
