@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Clock3, Heart, Home, Library, ListMusic, Menu, MoreHorizontal, Plus, Search, Users } from "lucide-react";
+import { Bell, Heart, Home, Library, ListMusic, Menu, MoreHorizontal, Plus, Search, Users } from "lucide-react";
 import { apiClient } from "./api";
 import { useDebounce } from "./hooks/useDebounce";
 import { normalizeSearchText } from "./searchUtils";
@@ -19,7 +19,7 @@ import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
-import { fallbackArt, imageForAlbum } from "./utils/artwork";
+import { fallbackArt, imageForAlbum, imageForSong } from "./utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 type ViewMode = "grid" | "list";
@@ -64,10 +64,6 @@ const navItems = [
   { key: "playlists", label: "Playlists", icon: ListMusic },
   { key: "artists", label: "Artists", icon: Users }
 ] as const;
-
-function safeDuration(song?: Song | null) {
-  return song?.durationSeconds && song.durationSeconds > 0 ? song.durationSeconds : 240;
-}
 
 function songStreamUrl(song: Song) {
   const version = encodeURIComponent(String(song.updatedAt ?? song.id));
@@ -1425,7 +1421,7 @@ export default function App() {
             {filteredFavoriteSongs.map((song) => (
               <button key={song.id} className={viewMode === "grid" ? "recent-card" : "recent-row"} onClick={() => handleSongSelect(song, favoriteSongs)}>
                 <div className="recent-card__media">
-                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
+                  <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1455,7 +1451,7 @@ export default function App() {
                 onClick={() => handleSongSelect(song, queueFromAlbum(song.albumId, fullLibrary))}
               >
                 <div className="recent-card__media">
-                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
+                  <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1469,71 +1465,42 @@ export default function App() {
     }
 
     if (activeNav === "home" && selectedFilter === "all" && !searchQuery.trim()) {
-      const forYouCards = [
-        { title: "Nature Acoustic", subtitle: "Organic calm", song: fullLibrary[0] ?? currentSong, variant: "wave" as const },
-        { title: "Early Morning Calm", subtitle: "Soft starts", song: fullLibrary[1] ?? currentSong, variant: "rings" as const },
-        { title: "Deep Focus", subtitle: "Quiet flow", song: fullLibrary[2] ?? currentSong, variant: "dots" as const },
-        { title: "Peaceful Piano", subtitle: "Warm keys", song: fullLibrary[3] ?? currentSong, variant: "bars" as const },
-        { title: "Rainy Day Vibes", subtitle: "Gentle mood", song: fullLibrary[4] ?? currentSong, variant: "lines" as const },
-      ].filter((item): item is { title: string; subtitle: string; song: Song; variant: "wave" | "rings" | "dots" | "bars" | "lines" } => Boolean(item.song));
       const playlistRows = uniqueById([currentSong, ...filteredRecentSongs, ...favoriteSongs, ...fullLibrary].filter(Boolean) as Song[]).slice(0, 8);
       return (
-        <>
-          <section className="for-you-section">
-            <div className="section-header">
-              <h2>For You</h2>
-              <button className="section-link" type="button" onClick={() => navigateDesktop("library")}>View all</button>
+        <section className="content-section playlist-section">
+          <div className="section-header">
+            <h2>Your Playlist</h2>
+            <button className="section-link section-link--pill" type="button" onClick={() => setPlaylistModalOpen(true)}>
+              <Plus size={17} /> Add
+            </button>
+          </div>
+          <div className="playlist-table">
+            <div className="playlist-table__head">
+              <span>#</span>
+              <span />
+              <span>Title</span>
+              <span>Artist</span>
+              <span>Album</span>
+              <span />
+              <span />
             </div>
-            <div className="for-you-grid">
-              {forYouCards.map((card) => (
-                <button key={card.title} className="for-you-card" type="button" onClick={() => handleSongSelect(card.song, fullLibrary)}>
-                  <AbstractCover seed={card.song.id || card.title} variant={card.variant} size="lg" />
-                  <span>
-                    <strong>{card.title}</strong>
-                    <small>{card.subtitle}</small>
-                  </span>
-                  <span className="for-you-card__play">▶</span>
+            {playlistRows.map((song, index) => (
+              <div key={song.id} className={song.id === currentSong?.id ? "playlist-row is-active" : "playlist-row"}>
+                <span>{index + 1}</span>
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                <button type="button" onClick={() => handleSongSelect(song, playlistRows)}>{song.title}</button>
+                <span>{song.artist}</span>
+                <span>{song.albumTitle}</span>
+                <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
+                  <Heart size={17} fill={song.favorite ? "currentColor" : "none"} />
                 </button>
-              ))}
-            </div>
-          </section>
-          <section className="content-section playlist-section">
-            <div className="section-header">
-              <h2>Your Playlist</h2>
-              <button className="section-link section-link--pill" type="button" onClick={() => setPlaylistModalOpen(true)}>
-                <Plus size={17} /> Add
-              </button>
-            </div>
-            <div className="playlist-table">
-              <div className="playlist-table__head">
-                <span>#</span>
-                <span />
-                <span>Title</span>
-                <span>Artist</span>
-                <span>Album</span>
-                <span />
-                <span><Clock3 size={15} /></span>
-                <span />
+                <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                  <MoreHorizontal size={18} />
+                </button>
               </div>
-              {playlistRows.map((song, index) => (
-                <div key={song.id} className={song.id === currentSong?.id ? "playlist-row is-active" : "playlist-row"}>
-                  <span>{index + 1}</span>
-                  <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
-                  <button type="button" onClick={() => handleSongSelect(song, playlistRows)}>{song.title}</button>
-                  <span>{song.artist}</span>
-                  <span>{song.albumTitle}</span>
-                  <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
-                    <Heart size={17} fill={song.favorite ? "currentColor" : "none"} />
-                  </button>
-                  <span>{safeDuration(song) ? `${Math.floor(safeDuration(song) / 60)}:${String(safeDuration(song) % 60).padStart(2, "0")}` : "—:—"}</span>
-                  <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
-                    <MoreHorizontal size={18} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-        </>
+            ))}
+          </div>
+        </section>
       );
     }
 
@@ -1757,7 +1724,7 @@ export default function App() {
           {filteredSongs.slice(0, 24).map((song) => (
             <div key={song.id} className="track-row">
               <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, filteredSongs)}>
-                <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                 <div>
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
