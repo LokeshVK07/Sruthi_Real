@@ -168,7 +168,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  const [desktopQueueOpen, setDesktopQueueOpen] = useState(true);
+  const [desktopQueueOpen, setDesktopQueueOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth >= 1200 : true));
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [customPlaylists, setCustomPlaylists] = useState<UiPlaylist[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -180,7 +180,7 @@ export default function App() {
   const [heroFeedback, setHeroFeedback] = useState<string | null>(null);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>(() => readStoredTracks(RECENTLY_PLAYED_STORAGE_KEY));
   const [recentlyPlayedHydrated, setRecentlyPlayedHydrated] = useState(() => typeof window !== "undefined");
-  const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 640 : false));
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTabKey>("home");
   const [mobileLibrarySection, setMobileLibrarySection] = useState<MobileLibrarySection>("favorites");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -677,11 +677,15 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const media = window.matchMedia("(max-width: 640px)");
-    const apply = () => setIsMobileViewport(media.matches);
+    const apply = () => {
+      setIsMobileViewport(false);
+      if (window.innerWidth < 1200) {
+        setDesktopQueueOpen(false);
+      }
+    };
     apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
   }, []);
 
   useEffect(() => {

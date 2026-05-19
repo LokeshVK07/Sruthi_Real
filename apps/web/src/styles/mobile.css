@@ -895,18 +895,15 @@
   }
 
   .desktop-only {
-    display: none !important;
+    display: block !important;
   }
 
   .mobile-only {
-    display: block;
+    display: none !important;
   }
 
   .app-shell {
-    display: block;
-    height: auto;
-    padding: 0;
-    overflow: visible;
+    display: grid;
   }
 }
 
