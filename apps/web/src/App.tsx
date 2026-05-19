@@ -201,6 +201,8 @@ export default function App() {
   const lastRefreshVersionRef = useRef("");
   const prefetchedSongIdsRef = useRef<Set<string>>(new Set());
   const prefetchedAlbumIdsRef = useRef<Map<string, { leadLimit: number; refreshLinks: boolean }>>(new Map());
+  const pendingPlaybackPrefetchRef = useRef<Map<string, { track: Song; sourceQueue: Song[] }>>(new Map());
+  const completedPlaybackPrefetchRef = useRef<Set<string>>(new Set());
   const deckARef = useRef<HTMLAudioElement | null>(null);
   const deckBRef = useRef<HTMLAudioElement | null>(null);
   // Tracks how many transparent retries we've done for a given song so a flaky
@@ -442,6 +444,21 @@ export default function App() {
     requestAlbumPrefetch(track.albumId, 8, true);
   }
 
+  function queuePlaybackPrefetch(track: Song, sourceQueue: Song[]) {
+    pendingPlaybackPrefetchRef.current.set(track.id, { track, sourceQueue });
+  }
+
+  function flushPlaybackPrefetch(songId: string | undefined) {
+    if (!songId || completedPlaybackPrefetchRef.current.has(songId)) return;
+    const pending = pendingPlaybackPrefetchRef.current.get(songId);
+    if (!pending) return;
+    pendingPlaybackPrefetchRef.current.delete(songId);
+    completedPlaybackPrefetchRef.current.add(songId);
+    window.setTimeout(() => {
+      schedulePlaybackPrefetches(pending.track, pending.sourceQueue);
+    }, 750);
+  }
+
   function updateRecentlyPlayed(track: Song) {
     setRecentlyPlayed((previous) => updateRecentlyPlayedList(previous, track));
   }
@@ -456,7 +473,6 @@ export default function App() {
         activeDeck.volume = isMuted ? 0 : volume;
         void safePlay(activeDeck);
         recordPlayback.mutate(song.id);
-        prefetchRelated.mutate(song.id);
       }
       return;
     }
@@ -493,7 +509,6 @@ export default function App() {
       debugPlayback("play-start", song.id);
       void safePlay(inactiveDeck);
       recordPlayback.mutate(song.id);
-      prefetchRelated.mutate(song.id);
     }
   }
 
@@ -510,13 +525,13 @@ export default function App() {
             : [track, ...queue]
           : [track];
 
+    if (autoPlay) {
+      queuePlaybackPrefetch(track, scopedQueue);
+    }
     activateSongDeck(track, autoPlay);
     playSong(track, scopedQueue);
     if (addToRecent) {
       updateRecentlyPlayed(track);
-    }
-    if (autoPlay) {
-      window.setTimeout(() => schedulePlaybackPrefetches(track, scopedQueue), 300);
     }
     setHeroMenuOpen(false);
   }
@@ -554,7 +569,6 @@ export default function App() {
     void safePlay(activeDeck);
     if (currentSong) {
       recordPlayback.mutate(currentSong.id);
-      prefetchRelated.mutate(currentSong.id);
     }
     setPlaying(true);
   }
@@ -645,7 +659,6 @@ export default function App() {
   const recordPlayback = useMutation<{ ok: boolean }, Error, string>({
     mutationFn: () => apiClient.recordPlayback(),
   });
-  const prefetchRelated = useMutation<{ queued: number }, Error, string>({ mutationFn: (songId: string) => apiClient.prefetchRelated(songId) });
   const prefetchSongs = useMutation<{ queued: number }, Error, string[]>({ mutationFn: (songIds: string[]) => apiClient.prefetchSongs(songIds) });
   const prefetchAlbum = useMutation<{ ok: boolean; queued: number; songCount: number }, Error, { albumId: string; leadLimit?: number; refreshLinks?: boolean }>({
     mutationFn: ({ albumId, leadLimit = 4, refreshLinks = false }: { albumId: string; leadLimit?: number; refreshLinks?: boolean }) =>
@@ -1068,15 +1081,6 @@ export default function App() {
   function handleSongSelect(song: Song, sourceQueue?: Song[]) {
     const scopedQueue = sourceQueue?.length ? sourceQueue : queueFromAlbum(song.albumId, fullLibrary);
     playTrack(song, { autoPlay: true, addToRecent: true, sourceQueue: scopedQueue.length ? scopedQueue : [song] });
-    if (song.albumId) {
-      const albumId = song.albumId;
-      const prefetch = () => requestAlbumPrefetch(albumId, 4, false);
-      if (typeof requestIdleCallback === "function") {
-        requestIdleCallback(prefetch, { timeout: 800 });
-      } else {
-        setTimeout(prefetch, 250);
-      }
-    }
   }
 
   function handleToggleMute() {
@@ -1821,8 +1825,10 @@ export default function App() {
           }}
           onPlaying={() => {
             if (deckIndex !== activeDeckIndex) return;
-            debugPlayback("playing", getDeck(deckIndex)?.dataset.songId);
+            const playingSongId = getDeck(deckIndex)?.dataset.songId;
+            debugPlayback("playing", playingSongId);
             setBuffering(false);
+            flushPlaybackPrefetch(playingSongId);
           }}
           onEnded={(event) => {
             if (deckIndex !== activeDeckIndex) return;
