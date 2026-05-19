@@ -4,7 +4,7 @@ const TELUGU_ID_PREFIX = "telugu:";
 const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
 const STREAM_RANGE_TIMEOUT_MS = 6000;
-const STREAM_FULL_TIMEOUT_MS = 12000;
+const STREAM_FULL_TIMEOUT_MS = 25000;
 const CHALLENGE_MARKERS = [
   "just a moment",
   "cloudflare",
@@ -761,9 +761,11 @@ async function handleApi(request, env, url, ctx) {
 
     const cacheKey = new Request(`${url.origin}/api/stream/${songId}`);
     const cached = await caches.default.match(cacheKey);
+    const durableCached = await hasDurableAudio(env, songId);
     return json({
       id: songId,
       cached: Boolean(cached),
+      durableCached,
       hasDbAudio: Boolean(row.audio_128_url || row.audio_320_url || row.remote_audio_128_url || row.remote_audio_320_url),
       linkStatus: row.link_status || "unknown",
       lastRefreshedAt: row.last_refreshed_at || null,
@@ -1123,16 +1125,26 @@ async function handleStream(songId, request, env, ctx) {
     if (!isAudioContentType(cachedType)) {
       ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
     } else if (range) {
+      const cachedForDurableStore = cached.clone();
       const ranged = await rangeResponseFromCachedAudio(cached, range);
       if (ranged) {
         markSongPlayable(env, ctx, songId);
+        ctx?.waitUntil(storeAudioInDurableCache(env, songId, cachedForDurableStore).catch(() => {}));
         return ranged;
       }
       ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
     } else {
       markSongPlayable(env, ctx, songId);
+      ctx?.waitUntil(storeAudioInDurableCache(env, songId, cached.clone()).catch(() => {}));
       return withCors(cached);
     }
+  }
+
+  const durableResponse = forceRefresh ? null : await audioResponseFromDurableCache(env, songId, range);
+  if (durableResponse) {
+    markSongPlayable(env, ctx, songId);
+    if (!range) ctx?.waitUntil(caches.default.put(cacheKey, durableResponse.clone()).catch(() => {}));
+    return durableResponse;
   }
 
   if (forceRefresh) {
@@ -1162,8 +1174,12 @@ async function handleStream(songId, request, env, ctx) {
   let response = await tryAudioCandidates(row, request);
   if (response) {
     markSongPlayable(env, ctx, songId);
-    if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-    else ctx?.waitUntil(warmSongInCache(env, origin, row));
+    if (!range) {
+      ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+      ctx?.waitUntil(storeAudioInDurableCache(env, songId, response.clone()).catch(() => {}));
+    } else {
+      ctx?.waitUntil(warmSongInCache(env, origin, row));
+    }
     return response;
   }
 
@@ -1173,8 +1189,12 @@ async function handleStream(songId, request, env, ctx) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
       markSongPlayable(env, ctx, songId);
-      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-      else ctx?.waitUntil(warmSongInCache(env, origin, row));
+      if (!range) {
+        ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+        ctx?.waitUntil(storeAudioInDurableCache(env, songId, response.clone()).catch(() => {}));
+      } else {
+        ctx?.waitUntil(warmSongInCache(env, origin, row));
+      }
       // Refresh the DB token rows in the background so future stored-URL
       // checks will succeed until the KV entry also covers the album.
       ctx?.waitUntil(tryRefreshSongLink(env, row));
@@ -1191,8 +1211,12 @@ async function handleStream(songId, request, env, ctx) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
       markSongPlayable(env, ctx, songId);
-      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-      else ctx?.waitUntil(warmSongInCache(env, origin, row));
+      if (!range) {
+        ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+        ctx?.waitUntil(storeAudioInDurableCache(env, songId, response.clone()).catch(() => {}));
+      } else {
+        ctx?.waitUntil(warmSongInCache(env, origin, row));
+      }
       ctx?.waitUntil(tryRefreshSongLink(env, row));
       return response;
     }
@@ -1205,8 +1229,12 @@ async function handleStream(songId, request, env, ctx) {
     response = await tryAudioCandidates(row, request);
     if (response) {
       markSongPlayable(env, ctx, songId);
-      if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-      else ctx?.waitUntil(warmSongInCache(env, origin, row));
+      if (!range) {
+        ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+        ctx?.waitUntil(storeAudioInDurableCache(env, songId, response.clone()).catch(() => {}));
+      } else {
+        ctx?.waitUntil(warmSongInCache(env, origin, row));
+      }
       return response;
     }
   }
@@ -1222,12 +1250,106 @@ async function handleStream(songId, request, env, ctx) {
 
 function markSongPlayable(env, ctx, songId) {
   if (!env?.DB || !songId) return;
-  ctx?.waitUntil(
-    env.DB.prepare("UPDATE songs SET link_status = 'fresh', last_refreshed_at = ? WHERE id = ?")
-      .bind(nowIso(), songId)
-      .run()
-      .catch(() => {}),
+  const update = env.DB.prepare("UPDATE songs SET link_status = 'fresh', last_refreshed_at = ? WHERE id = ?")
+    .bind(nowIso(), songId)
+    .run()
+    .catch(() => {});
+  if (ctx?.waitUntil) ctx.waitUntil(update);
+}
+
+function audioObjectKey(songId) {
+  return `audio/${encodeURIComponent(String(songId))}.mp3`;
+}
+
+function audioMetaKey(songId) {
+  return `audio-meta/${encodeURIComponent(String(songId))}.json`;
+}
+
+async function hasDurableAudio(env, songId) {
+  if (!songId) return false;
+  if (env?.AUDIO_BUCKET) {
+    const object = await env.AUDIO_BUCKET.head(audioObjectKey(songId)).catch(() => null);
+    if (object) return true;
+  }
+  if (!env?.TOKEN_CACHE) return false;
+  return Boolean(await env.TOKEN_CACHE.get(audioMetaKey(songId)).catch(() => null));
+}
+
+async function audioResponseFromR2(env, songId, rangeHeader) {
+  if (!env?.AUDIO_BUCKET || !songId) return null;
+  const object = await env.AUDIO_BUCKET.get(audioObjectKey(songId)).catch(() => null);
+  if (!object?.body) return null;
+  const body = await new Response(object.body).arrayBuffer().catch(() => null);
+  if (!body?.byteLength || !isValidAudioBytes(body)) return null;
+  if (rangeHeader) return rangeResponseFromAudioBuffer(body, rangeHeader, object.httpMetadata?.contentType || "audio/mpeg");
+
+  const headers = new Headers(corsHeaders());
+  headers.set("Content-Type", object.httpMetadata?.contentType || "audio/mpeg");
+  headers.set("Content-Length", String(body.byteLength));
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  return new Response(body, { status: 200, headers });
+}
+
+async function storeAudioInR2(env, songId, response) {
+  if (!env?.AUDIO_BUCKET || !songId || !response?.ok) return false;
+  const contentType = cleanText(response.headers.get("content-type")).toLowerCase();
+  if (!isAudioContentType(contentType) || response.headers.get("content-range")) return false;
+  const body = await response.arrayBuffer().catch(() => null);
+  if (!body?.byteLength || !isValidAudioBytes(body)) return false;
+  await env.AUDIO_BUCKET.put(audioObjectKey(songId), body, {
+    httpMetadata: { contentType: response.headers.get("content-type") || "audio/mpeg" },
+    customMetadata: { songId: String(songId), cachedAt: nowIso() },
+  });
+  return true;
+}
+
+async function audioResponseFromKv(env, songId, rangeHeader) {
+  if (!env?.TOKEN_CACHE || !songId) return null;
+  const body = await env.TOKEN_CACHE.get(audioObjectKey(songId), "arrayBuffer").catch(() => null);
+  if (!body?.byteLength || !isValidAudioBytes(body)) return null;
+  const metaText = await env.TOKEN_CACHE.get(audioMetaKey(songId)).catch(() => "");
+  let contentType = "audio/mpeg";
+  try {
+    contentType = JSON.parse(metaText || "{}").contentType || contentType;
+  } catch {}
+  if (rangeHeader) return rangeResponseFromAudioBuffer(body, rangeHeader, contentType);
+
+  const headers = new Headers(corsHeaders());
+  headers.set("Content-Type", contentType);
+  headers.set("Content-Length", String(body.byteLength));
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  return new Response(body, { status: 200, headers });
+}
+
+async function storeAudioInKv(env, songId, response) {
+  if (!env?.TOKEN_CACHE || !songId || !response?.ok) return false;
+  const contentType = cleanText(response.headers.get("content-type")).toLowerCase();
+  if (!isAudioContentType(contentType) || response.headers.get("content-range")) return false;
+  const body = await response.arrayBuffer().catch(() => null);
+  if (!body?.byteLength || !isValidAudioBytes(body)) return false;
+  await env.TOKEN_CACHE.put(audioObjectKey(songId), body);
+  await env.TOKEN_CACHE.put(
+    audioMetaKey(songId),
+    JSON.stringify({
+      songId: String(songId),
+      contentType: response.headers.get("content-type") || "audio/mpeg",
+      byteLength: body.byteLength,
+      cachedAt: nowIso(),
+    }),
   );
+  return true;
+}
+
+async function audioResponseFromDurableCache(env, songId, rangeHeader) {
+  return (await audioResponseFromR2(env, songId, rangeHeader)) || (await audioResponseFromKv(env, songId, rangeHeader));
+}
+
+async function storeAudioInDurableCache(env, songId, response) {
+  const r2Stored = await storeAudioInR2(env, songId, response.clone()).catch(() => false);
+  if (r2Stored) return true;
+  return storeAudioInKv(env, songId, response).catch(() => false);
 }
 
 async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
@@ -1237,7 +1359,14 @@ async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
   const total = body.byteLength;
   if (!total) return null;
   if (!isValidAudioBytes(body)) return null;
+  return rangeResponseFromAudioBuffer(body, rangeHeader, cachedResponse.headers.get("content-type") || "audio/mpeg");
+}
 
+function rangeResponseFromAudioBuffer(body, rangeHeader, contentType = "audio/mpeg") {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(cleanText(rangeHeader));
+  if (!match) return null;
+  const total = body.byteLength;
+  if (!total) return null;
   let start = match[1] ? Number(match[1]) : 0;
   let end = match[2] ? Number(match[2]) : total - 1;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
@@ -1255,7 +1384,7 @@ async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
   }
 
   const headers = new Headers(corsHeaders());
-  headers.set("Content-Type", cachedResponse.headers.get("content-type") || "audio/mpeg");
+  headers.set("Content-Type", contentType || "audio/mpeg");
   headers.set("Content-Length", String(end - start + 1));
   headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
   headers.set("Accept-Ranges", "bytes");
@@ -1296,6 +1425,7 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   };
 
   let response;
+  let usedFullFallbackForRange = false;
   if (rangeHeader) {
     const rangeHeaders = new Headers(baseHeaders);
     rangeHeaders.set("Range", rangeHeader);
@@ -1307,6 +1437,7 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   } else {
     try {
       response = await fetchCandidate(baseHeaders, STREAM_FULL_TIMEOUT_MS);
+      usedFullFallbackForRange = true;
     } catch {
       return null;
     }
@@ -1324,6 +1455,9 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
 
   if (!response.ok) return null;
   if (contentType.includes("text/html") || contentType.includes("text/plain")) return null;
+  if (rangeHeader && usedFullFallbackForRange) {
+    return audioResponseFromBufferedBody(response, rangeHeader);
+  }
   if (!isAudioContentType(contentType) && !rangeHeader) {
     const buffered = await audioResponseFromBufferedBody(response, null);
     if (buffered) return buffered;
@@ -2362,6 +2496,8 @@ async function warmSongInCache(env, origin, row) {
   if (!response) return false;
 
   await caches.default.put(cacheKey, response.clone());
+  await storeAudioInDurableCache(env, row.id, response.clone()).catch(() => false);
+  markSongPlayable(env, null, row.id);
   return true;
 }
 
