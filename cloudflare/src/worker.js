@@ -1237,6 +1237,11 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   if (!response.ok) return null;
   if (contentType.includes("text/html") || contentType.includes("text/plain")) return null;
 
+  if (rangeHeader && !response.headers.get("content-range")) {
+    const ranged = await rangeResponseFromAudioResponse(response, rangeHeader);
+    if (ranged) return ranged;
+  }
+
   const outHeaders = new Headers(corsHeaders());
   outHeaders.set("Content-Type", response.headers.get("content-type") || "audio/mpeg");
   if (response.headers.get("content-length")) outHeaders.set("Content-Length", response.headers.get("content-length"));
@@ -1247,6 +1252,40 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
     status: response.status,
     headers: outHeaders,
   });
+}
+
+async function rangeResponseFromAudioResponse(response, rangeHeader) {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(cleanText(rangeHeader));
+  if (!match) return null;
+
+  const body = await response.arrayBuffer().catch(() => null);
+  if (!body?.byteLength) return null;
+
+  const total = body.byteLength;
+  let start = match[1] ? Number(match[1]) : 0;
+  let end = match[2] ? Number(match[2]) : total - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+
+  start = Math.max(0, start);
+  end = Math.min(total - 1, end);
+  if (start > end || start >= total) {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        ...corsHeaders(),
+        "Content-Range": `bytes */${total}`,
+        "Accept-Ranges": "bytes",
+      },
+    });
+  }
+
+  const headers = new Headers(corsHeaders());
+  headers.set("Content-Type", response.headers.get("content-type") || "audio/mpeg");
+  headers.set("Content-Length", String(end - start + 1));
+  headers.set("Content-Range", `bytes ${start}-${end}/${total}`);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=3600");
+  return new Response(body.slice(start, end + 1), { status: 206, headers });
 }
 
 async function tryRefreshSongLink(env, row) {
