@@ -1,6 +1,7 @@
 import { GripVertical, Pause, Play, SkipBack, SkipForward, Trash2 } from "lucide-react";
 import type { Song } from "../../types";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type MobileQueueProps = {
   queue: Song[];
@@ -64,7 +65,7 @@ export default function MobileQueue({
 
       {currentSong ? (
         <section className="mobile-queue-now" aria-label="Now playing">
-          <AbstractCover seed={currentSong.id || currentSong.title} size="md" className="mobile-queue-now__art" active />
+          <AbstractCover src={imageForSong(currentSong)} alt={currentSong.title} seed={currentSong.id || currentSong.title} size="md" className="mobile-queue-now__art" active />
           <div className="mobile-queue-now__copy">
             <span>Now Playing</span>
             <strong>{currentSong.title}</strong>
@@ -100,7 +101,7 @@ export default function MobileQueue({
               return (
                 <div key={`${song.id}-${index}`} className={active ? "mobile-queue-row is-active" : "mobile-queue-row"}>
                   <button type="button" className="mobile-queue-row__main" onClick={() => onPlay(song)} aria-label={`Play ${song.title}`}>
-                    <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" active={active} />
+                    <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" active={active} />
                     <span className="mobile-queue-row__copy">
                       <strong>{song.title}</strong>
                       <em>{song.artist}</em>

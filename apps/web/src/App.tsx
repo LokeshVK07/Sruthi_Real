@@ -204,6 +204,8 @@ export default function App() {
   const prefetchedAlbumIdsRef = useRef<Map<string, { leadLimit: number; refreshLinks: boolean }>>(new Map());
   const deckARef = useRef<HTMLAudioElement | null>(null);
   const deckBRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const deckGainNodesRef = useRef<WeakMap<HTMLAudioElement, GainNode>>(new WeakMap());
   // Tracks how many transparent retries we've done for a given song so a flaky
   // upstream URL gets a second/third chance before we surface an error to the
   // user. Cleared whenever a different song starts.
@@ -312,6 +314,7 @@ export default function App() {
       coverUrl: latest?.coverUrl || song.coverUrl || albumArtUrl,
       cover_url: latest?.cover_url || song.cover_url || albumArtUrl,
       album_art: latest?.album_art || song.album_art || albumArtUrl,
+      year: latest?.year ?? song.year ?? album?.year ?? null,
     };
   };
   const enrichedQueue = useMemo(
@@ -338,9 +341,9 @@ export default function App() {
   const recentSongs = useMemo(
     () =>
       recentlyPlayed
-        .map((track) => songLookup.get(track.id) ?? track)
+        .map((track) => withLatestSongMetadata(track) ?? track)
         .slice(0, MAX_RECENTLY_PLAYED),
-    [recentlyPlayed, songLookup]
+    [recentlyPlayed, songLookup, albumLookup]
   );
   const currentSong = useMemo(() => {
     const queuedSong = enrichedQueue[currentIndex] ?? null;
@@ -349,6 +352,7 @@ export default function App() {
   const artistItems = home?.artists ?? [];
   const filteredRecentSongs = useMemo(() => recentSongs.filter((song) => titleMatches(song, debouncedQuery)), [recentSongs, debouncedQuery]);
   const filteredFavoriteSongs = useMemo(() => favoriteSongs.filter((song) => titleMatches(song, debouncedQuery)), [favoriteSongs, debouncedQuery]);
+  const songYearLabel = (song: Song) => song.year ?? albumLookup.get(song.albumId)?.year ?? "Tamil";
   const selectedPlaylist = useMemo(
     () => customPlaylists.find((playlist) => playlist.id === selectedPlaylistId) ?? null,
     [customPlaylists, selectedPlaylistId]
@@ -389,6 +393,43 @@ export default function App() {
   const getDeck = (index: number) => (index === 0 ? deckARef.current : deckBRef.current);
   const getActiveDeck = () => getDeck(activeDeckIndex);
   const getInactiveDeck = () => getDeck(activeDeckIndex === 0 ? 1 : 0);
+
+  function ensureDeckGain(deck: HTMLAudioElement | null) {
+    if (!deck || typeof window === "undefined") return null;
+    const existing = deckGainNodesRef.current.get(deck);
+    if (existing) return existing;
+    const AudioContextConstructor = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextConstructor) return null;
+    const context = audioContextRef.current ?? new AudioContextConstructor();
+    audioContextRef.current = context;
+    const source = context.createMediaElementSource(deck);
+    const gain = context.createGain();
+    source.connect(gain);
+    gain.connect(context.destination);
+    deckGainNodesRef.current.set(deck, gain);
+    return gain;
+  }
+
+  function applyDeckVolume(deck: HTMLAudioElement | null, nextVolume: number, muted: boolean) {
+    if (!deck) return;
+    const normalizedVolume = Math.max(0, Math.min(1, nextVolume));
+    const gain = ensureDeckGain(deck);
+    if (gain) {
+      gain.gain.value = muted ? 0 : normalizedVolume;
+      deck.volume = 1;
+      deck.muted = false;
+      return;
+    }
+    deck.volume = normalizedVolume;
+    deck.muted = muted;
+  }
+
+  function resumeAudioContext() {
+    const context = audioContextRef.current;
+    if (context?.state === "suspended") {
+      void context.resume();
+    }
+  }
 
   function rememberSearchTerm(value: string) {
     const term = value.trim();
@@ -444,8 +485,8 @@ export default function App() {
     if (deckHasSong(activeDeck, song)) {
       setBuffering(false);
       if (shouldPlay && activeDeck) {
-        activeDeck.muted = isMuted;
-        activeDeck.volume = isMuted ? 0 : volume;
+        resumeAudioContext();
+        applyDeckVolume(activeDeck, volume, isMuted);
         void safePlay(activeDeck);
         recordPlayback.mutate(song.id);
         prefetchRelated.mutate(song.id);
@@ -469,20 +510,19 @@ export default function App() {
       debugPlayback("load-called", song.id);
     }
     inactiveDeck.currentTime = 0;
-    inactiveDeck.muted = isMuted;
-    inactiveDeck.volume = isMuted ? 0 : volume;
+    applyDeckVolume(inactiveDeck, volume, isMuted);
 
     if (activeDeck) {
       activeDeck.pause();
       activeDeck.currentTime = 0;
-      activeDeck.muted = true;
-      activeDeck.volume = 0;
+      applyDeckVolume(activeDeck, 0, true);
     }
 
     setActiveDeckIndex(nextDeckIndex);
 
     if (shouldPlay) {
       debugPlayback("play-start", song.id);
+      resumeAudioContext();
       void safePlay(inactiveDeck);
       recordPlayback.mutate(song.id);
       prefetchRelated.mutate(song.id);
@@ -749,14 +789,8 @@ export default function App() {
   useEffect(() => {
     const activeDeck = getActiveDeck();
     const inactiveDeck = getInactiveDeck();
-    if (activeDeck) {
-      activeDeck.volume = isMuted ? 0 : volume;
-      activeDeck.muted = isMuted;
-    }
-    if (inactiveDeck) {
-      inactiveDeck.volume = 0;
-      inactiveDeck.muted = true;
-    }
+    applyDeckVolume(activeDeck, volume, isMuted);
+    applyDeckVolume(inactiveDeck, 0, true);
   }, [volume, isMuted, activeDeckIndex]);
 
   useEffect(() => {
@@ -841,14 +875,13 @@ export default function App() {
 
     activeDeck.pause();
     activeDeck.currentTime = 0;
-    activeDeck.muted = true;
-    activeDeck.volume = 0;
+    applyDeckVolume(activeDeck, 0, true);
 
     setActiveDeckIndex(nextDeckIndex);
-    inactiveDeck.muted = isMuted;
-    inactiveDeck.volume = isMuted ? 0 : volume;
+    applyDeckVolume(inactiveDeck, volume, isMuted);
 
     if (playing) {
+      resumeAudioContext();
       void safePlay(inactiveDeck);
     }
   }, [currentSong?.id]);
@@ -1106,10 +1139,25 @@ export default function App() {
   }
 
   function handleVolumeChange(nextVolume: number) {
-    setVolume(nextVolume);
-    if (nextVolume <= 0.01) {
+    const normalizedVolume = Math.max(0, Math.min(1, nextVolume));
+    const shouldMute = normalizedVolume <= 0.01;
+    setVolume(normalizedVolume);
+    if (!shouldMute) {
+      lastVolumeRef.current = normalizedVolume;
+    }
+    const activeDeck = getActiveDeck();
+    const inactiveDeck = getInactiveDeck();
+    if (activeDeck) {
+      activeDeck.volume = normalizedVolume;
+      activeDeck.muted = shouldMute;
+    }
+    if (inactiveDeck) {
+      inactiveDeck.volume = normalizedVolume;
+      inactiveDeck.muted = shouldMute || !deckHasSong(inactiveDeck, currentSong);
+    }
+    if (shouldMute) {
       setIsMuted(true);
-    } else if (isMuted) {
+    } else {
       setIsMuted(false);
     }
   }
@@ -1524,16 +1572,19 @@ export default function App() {
               {selectedAlbumForView.songs.map((song) => (
                 <div key={song.id} className="track-row">
                   <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
-                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                    <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
                     </div>
                   </button>
                   <span>{song.albumTitle}</span>
-                  <span>{song.year ?? "Tamil"}</span>
+                  <span>{songYearLabel(song)}</span>
                   <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
                     ♥
+                  </button>
+                  <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                    <MoreHorizontal size={18} />
                   </button>
                 </div>
               ))}
@@ -1592,19 +1643,22 @@ export default function App() {
                     onMouseEnter={() => requestSongPrefetch([song.id])}
                     onClick={() => handleSongSelect(song, composerSongs)}
                   >
-                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                    <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
                     </div>
                   </button>
                   <span>{song.albumTitle}</span>
-                  <span>{song.year ?? "Tamil"}</span>
+                  <span>{songYearLabel(song)}</span>
                   <button
                     className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"}
                     onClick={() => toggleFavorite.mutate(song.id)}
                   >
                     ♥
+                  </button>
+                  <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                    <MoreHorizontal size={18} />
                   </button>
                 </div>
               ))}
@@ -1673,16 +1727,19 @@ export default function App() {
                 {selectedPlaylistSongs.map((song) => (
                   <div key={song.id} className="track-row">
                     <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
-                      <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                      <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                       <div>
                         <strong>{song.title}</strong>
                         <span>{song.artist}</span>
                       </div>
                     </button>
                     <span>{song.albumTitle}</span>
-                    <span>{song.year ?? "Tamil"}</span>
+                    <span>{songYearLabel(song)}</span>
                     <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
                       ♥
+                    </button>
+                    <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                      <MoreHorizontal size={18} />
                     </button>
                   </div>
                 ))}
@@ -1731,9 +1788,12 @@ export default function App() {
                 </div>
               </button>
               <span>{song.albumTitle}</span>
-              <span>{song.year ?? "Tamil"}</span>
+              <span>{songYearLabel(song)}</span>
               <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
                 ♥
+              </button>
+              <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                <MoreHorizontal size={18} />
               </button>
             </div>
           ))}
@@ -1765,6 +1825,7 @@ export default function App() {
     playlistSummaries,
     fullLibrary,
     albumItems,
+    albumLookup,
     homePlaylistCards,
     homeComposerCards,
   ]);

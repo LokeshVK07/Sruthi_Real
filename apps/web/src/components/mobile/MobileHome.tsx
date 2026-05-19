@@ -1,6 +1,7 @@
 import { Bell, ChevronRight, Heart, MoreHorizontal, Play, Plus } from "lucide-react";
 import type { RefreshStatus, Song } from "../../types";
 import AbstractCover from "../AbstractCover";
+import { imageForSong } from "../../utils/artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 
@@ -83,7 +84,7 @@ export default function MobileHome({
                 onClick={() => onPlayTrack(track, favorites)}
                 onMouseEnter={() => onPrefetchTrack?.(track)}
               >
-                <AbstractCover seed={track.id || track.title} size="lg" className="mobile-track-card__art" />
+                <AbstractCover src={imageForSong(track)} alt={track.title} seed={track.id || track.title} size="lg" className="mobile-track-card__art" />
                 <span className="mobile-track-card__play">
                   <Play size={15} fill="currentColor" />
                 </span>
@@ -152,7 +153,7 @@ export default function MobileHome({
                 onClick={() => onPlayTrack(track, recentlyPlayed)}
                 onMouseEnter={() => onPrefetchTrack?.(track)}
               >
-                <AbstractCover seed={track.id || track.title} size="sm" className="mobile-artwork" />
+                <AbstractCover src={imageForSong(track)} alt={track.title} seed={track.id || track.title} size="sm" className="mobile-artwork" />
                 <span className="mobile-song-row__copy">
                   <strong title={track.title}>{track.title}</strong>
                   <em title={track.artist}>{track.artist}</em>

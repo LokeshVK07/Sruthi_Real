@@ -2,6 +2,7 @@ import { Heart, ListMusic, Plus, Users } from "lucide-react";
 import type { Song } from "../../types";
 import AbstractCover from "../AbstractCover";
 import type { MobileLibrarySection } from "./MobileLayout";
+import { imageForSong } from "../../utils/artwork";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 
@@ -38,7 +39,7 @@ function SongList({ songs, empty, onPlay }: { songs: Song[]; empty: string; onPl
     <div className="mobile-recent-list">
       {songs.map((song) => (
         <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlay(song)}>
-          <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
+          <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
           <span className="mobile-song-row__copy">
             <strong>{song.title}</strong>
             <em>{song.artist}</em>

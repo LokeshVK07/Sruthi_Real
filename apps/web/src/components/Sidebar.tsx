@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Download, Heart, History, Leaf, Moon, Music2, Plus, Radio, Sprout, Waves } from "lucide-react";
+import { Download, Heart, History, Leaf, Music2, Plus, Sprout } from "lucide-react";
 
 export type NavKey = "home" | "search" | "library" | "favorites" | "playlists" | "albums" | "artists";
 
@@ -44,13 +44,6 @@ export default function Sidebar({
     { key: "downloaded" as const, label: "Downloaded", icon: Download, onClick: () => onNavChange("library") },
     { key: "new" as const, label: "New Playlist", icon: Plus, onClick: onCreatePlaylist },
   ];
-  const browseItems = [
-    { label: "Focus", icon: Radio },
-    { label: "Relax", icon: Waves },
-    { label: "Nature", icon: Sprout },
-    { label: "Sleep", icon: Moon },
-  ];
-
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -114,21 +107,6 @@ export default function Sidebar({
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="sidebar__browse">
-        <div className="sidebar__section-label">BROWSE</div>
-        {browseItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button key={item.label} className="sidebar__library-item" onClick={() => onNavChange("library")}>
-              <span className="sidebar__library-icon">
-                <Icon size={17} />
-              </span>
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
       </section>
 
       <button className="sidebar__breath-card" type="button" onClick={() => onNavChange("library")}>

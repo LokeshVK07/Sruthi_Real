@@ -1,3 +1,6 @@
+import type { CSSProperties } from "react";
+import { fallbackArt } from "../utils/artwork";
+
 type AbstractCoverVariant = "wave" | "bars" | "rings" | "dots" | "lines" | "leaf" | "hills";
 type AbstractCoverSize = "xs" | "sm" | "md" | "lg" | "hero";
 
@@ -36,7 +39,20 @@ export default function AbstractCover({ src, alt = "", variant, size = "md", act
 
   return (
     <span className={classes} aria-hidden="true" style={{ "--cover-shift": `${offset}px` } as CSSProperties}>
-      {src ? <img className="abstract-cover__image" src={src} alt={alt} loading="lazy" decoding="async" /> : null}
+      {src ? (
+        <img
+          className="abstract-cover__image"
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onError={(event) => {
+            if (event.currentTarget.src !== fallbackArt) {
+              event.currentTarget.src = fallbackArt;
+            }
+          }}
+        />
+      ) : null}
       {resolvedVariant === "bars" ? (
         <span className="abstract-cover__bars">
           {Array.from({ length: 9 }).map((_, index) => (
@@ -80,4 +96,3 @@ export default function AbstractCover({ src, alt = "", variant, size = "md", act
     </span>
   );
 }
-import type { CSSProperties } from "react";

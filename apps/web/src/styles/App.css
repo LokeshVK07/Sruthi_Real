@@ -328,12 +328,13 @@ img {
   position: relative;
   min-height: 300px;
   border-radius: 22px;
-  overflow: hidden;
+  overflow: visible;
   background:
     linear-gradient(105deg, rgba(220, 235, 229, 0.88), rgba(255, 255, 255, 0.82) 50%, rgba(251, 250, 245, 0.92)),
     var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+  z-index: 30;
 }
 
 .hero {
@@ -346,6 +347,8 @@ img {
 .hero__cover-wrap {
   height: 100%;
   min-height: 300px;
+  overflow: hidden;
+  border-radius: 22px 0 0 22px;
 }
 
 .hero__cover-wrap .abstract-cover {
@@ -456,7 +459,7 @@ img {
   position: absolute;
   top: calc(100% + 12px);
   right: 0;
-  z-index: 20;
+  z-index: 90;
   width: 240px;
   border-radius: 16px;
   border: 1px solid var(--border);
@@ -599,7 +602,7 @@ img {
 
 .track-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(120px, 1fr) 70px 42px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(120px, 1fr) 70px 42px 42px;
   gap: 12px;
   align-items: center;
 }

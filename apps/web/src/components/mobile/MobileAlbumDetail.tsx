@@ -1,7 +1,7 @@
 import { ChevronLeft, Play, Shuffle } from "lucide-react";
 import type { AlbumDetail, Song } from "../../types";
 import AbstractCover from "../AbstractCover";
-import { imageForAlbum } from "../../utils/artwork";
+import { imageForAlbum, imageForSong } from "../../utils/artwork";
 
 type MobileAlbumDetailProps = {
   album: AlbumDetail;
@@ -48,9 +48,9 @@ export default function MobileAlbumDetail({ album, fallbackArt: _fallbackArt, on
       <div className="mobile-recent-list">
         {album.songs.map((song, index) => (
           <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, album.songs)}>
-            <span className="mobile-song-row__index">{index + 1}</span>
+            <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
             <div className="mobile-song-row__copy">
-              <strong>{song.title}</strong>
+              <strong>{index + 1}. {song.title}</strong>
               <span>{song.artist}</span>
             </div>
           </button>
