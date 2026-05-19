@@ -1124,9 +1124,13 @@ async function handleStream(songId, request, env, ctx) {
       ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
     } else if (range) {
       const ranged = await rangeResponseFromCachedAudio(cached, range);
-      if (ranged) return ranged;
+      if (ranged) {
+        markSongPlayable(env, ctx, songId);
+        return ranged;
+      }
       ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
     } else {
+      markSongPlayable(env, ctx, songId);
       return withCors(cached);
     }
   }
@@ -1157,6 +1161,7 @@ async function handleStream(songId, request, env, ctx) {
 
   let response = await tryAudioCandidates(row, request);
   if (response) {
+    markSongPlayable(env, ctx, songId);
     if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
     else ctx?.waitUntil(warmSongInCache(env, origin, row));
     return response;
@@ -1167,6 +1172,7 @@ async function handleStream(songId, request, env, ctx) {
   for (const freshUrl of freshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
+      markSongPlayable(env, ctx, songId);
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
       // Refresh the DB token rows in the background so future stored-URL
@@ -1184,6 +1190,7 @@ async function handleStream(songId, request, env, ctx) {
   for (const freshUrl of bypassedFreshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
+      markSongPlayable(env, ctx, songId);
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
       ctx?.waitUntil(tryRefreshSongLink(env, row));
@@ -1197,6 +1204,7 @@ async function handleStream(songId, request, env, ctx) {
     row = refreshed;
     response = await tryAudioCandidates(row, request);
     if (response) {
+      markSongPlayable(env, ctx, songId);
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
       return response;
@@ -1210,6 +1218,16 @@ async function handleStream(songId, request, env, ctx) {
       .catch(() => {}),
   );
   return json({ error: "Upstream stream unavailable." }, 502);
+}
+
+function markSongPlayable(env, ctx, songId) {
+  if (!env?.DB || !songId) return;
+  ctx?.waitUntil(
+    env.DB.prepare("UPDATE songs SET link_status = 'fresh', last_refreshed_at = ? WHERE id = ?")
+      .bind(nowIso(), songId)
+      .run()
+      .catch(() => {}),
+  );
 }
 
 async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
