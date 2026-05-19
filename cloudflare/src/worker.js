@@ -3,7 +3,7 @@ const DEFAULT_SYNC_PATH = "/sruthi-sync.json";
 const TELUGU_ID_PREFIX = "telugu:";
 const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
-const STREAM_RANGE_TIMEOUT_MS = 2200;
+const STREAM_RANGE_TIMEOUT_MS = 6000;
 const STREAM_FULL_TIMEOUT_MS = 12000;
 const DEFAULT_TAMIL_OFFICIAL_PLAYLISTS = [
   { id: "top-100", name: "Top 100", sourceUrl: "https://www.masstamilan.dev/playlists/top-100-songs" },
@@ -1188,43 +1188,46 @@ async function tryAudioCandidates(row, request) {
 }
 
 async function fetchAudio(target, albumUrl, rangeHeader) {
-  const headers = new Headers({
+  const baseHeaders = new Headers({
     Accept: "audio/mpeg,audio/*;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     Referer: cleanText(albumUrl) || SITE_ORIGIN,
     "User-Agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   });
-  if (rangeHeader) headers.set("Range", rangeHeader);
-
-  const timeoutMs = rangeHeader ? STREAM_RANGE_TIMEOUT_MS : STREAM_FULL_TIMEOUT_MS;
-  const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-    ? AbortSignal.timeout(timeoutMs)
-    : undefined;
-
-  let response;
-  try {
-    response = await fetch(target, {
+  const fetchCandidate = (headers, timeoutMs) => {
+    const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+    return fetch(target, {
       method: "GET",
       headers,
       redirect: "follow",
       signal,
     });
-  } catch {
-    return null;
+  };
+
+  let response;
+  if (rangeHeader) {
+    const rangeHeaders = new Headers(baseHeaders);
+    rangeHeaders.set("Range", rangeHeader);
+    try {
+      response = await fetchCandidate(rangeHeaders, STREAM_RANGE_TIMEOUT_MS);
+    } catch {
+      response = null;
+    }
+  } else {
+    try {
+      response = await fetchCandidate(baseHeaders, STREAM_FULL_TIMEOUT_MS);
+    } catch {
+      return null;
+    }
   }
 
-  let contentType = (response.headers.get("content-type") || "").toLowerCase();
-  if ((!response.ok || contentType.includes("text/html") || contentType.includes("text/plain")) && rangeHeader) {
-    const retryHeaders = new Headers(headers);
-    retryHeaders.delete("Range");
+  let contentType = response ? (response.headers.get("content-type") || "").toLowerCase() : "";
+  if ((!response || !response.ok || contentType.includes("text/html") || contentType.includes("text/plain")) && rangeHeader) {
     try {
-      response = await fetch(target, {
-        method: "GET",
-        headers: retryHeaders,
-        redirect: "follow",
-        signal,
-      });
+      response = await fetchCandidate(baseHeaders, STREAM_FULL_TIMEOUT_MS);
     } catch {
       return null;
     }
