@@ -1147,31 +1147,32 @@ async function handleStream(songId, request, env, ctx) {
 
   if (!row) return json({ error: "Song not found." }, 404);
 
-  if (!forceRefresh) {
-    // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
-    // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
-    // stale-URL attempt below, so no wall-clock time is wasted.
-    const freshUrlsPromise = fetchFreshAudioUrls(row, env);
+  // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
+  // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
+  // stored-URL attempt below, so no wall-clock time is wasted. A forced refresh
+  // skips only Worker cache/token cache; it must still try DB audio URLs first
+  // because old MassTamilan album pages can be Cloudflare-challenged while the
+  // existing downloader URL is still perfectly playable.
+  const freshUrlsPromise = fetchFreshAudioUrls(row, env, forceRefresh ? { bypassCache: true } : {});
 
-    let response = await tryAudioCandidates(row, request);
+  let response = await tryAudioCandidates(row, request);
+  if (response) {
+    if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+    else ctx?.waitUntil(warmSongInCache(env, origin, row));
+    return response;
+  }
+
+  // Stored URLs failed. Await fresh URLs (usually already resolved from KV).
+  const freshUrls = await freshUrlsPromise;
+  for (const freshUrl of freshUrls) {
+    response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
+      // Refresh the DB token rows in the background so future stored-URL
+      // checks will succeed until the KV entry also covers the album.
+      ctx?.waitUntil(tryRefreshSongLink(env, row));
       return response;
-    }
-
-    // Stored URLs returned 403. Await the fresh URLs (usually already resolved).
-    const freshUrls = await freshUrlsPromise;
-    for (const freshUrl of freshUrls) {
-      response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
-      if (response) {
-        if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-        else ctx?.waitUntil(warmSongInCache(env, origin, row));
-        // Refresh the DB token rows in the background so future stored-URL
-        // checks will succeed until the KV entry also covers the album.
-        ctx?.waitUntil(tryRefreshSongLink(env, row));
-        return response;
-      }
     }
   }
 
@@ -1179,8 +1180,7 @@ async function handleStream(songId, request, env, ctx) {
   // fresh album lookup before the heavier DB refresh path. `refresh=1` starts
   // here immediately so frontend repair retries do not waste time on known-bad
   // cached/stored URLs.
-  let response = null;
-  const bypassedFreshUrls = await fetchFreshAudioUrls(row, env, { bypassCache: true });
+  const bypassedFreshUrls = forceRefresh ? [] : await fetchFreshAudioUrls(row, env, { bypassCache: true });
   for (const freshUrl of bypassedFreshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
