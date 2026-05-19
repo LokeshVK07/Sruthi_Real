@@ -10,14 +10,14 @@ import MobileFullPlayer from "./MobileFullPlayer";
 import MobileHome from "./MobileHome";
 import MobileLibrary from "./MobileLibrary";
 import MobileMiniPlayer from "./MobileMiniPlayer";
+import MobileMore from "./MobileMore";
 import MobilePlaylists from "./MobilePlaylists";
+import MobileQueue from "./MobileQueue";
 import MobileQueueSheet from "./MobileQueueSheet";
 import MobileRefreshStatusSheet from "./MobileRefreshStatusSheet";
 import MobileSearch from "./MobileSearch";
-import AbstractCover from "../AbstractCover";
-import { imageForSong } from "../../utils/artwork";
 
-export type MobileLibrarySection = "favorites" | "playlists" | "albums" | "artists" | "recent";
+export type MobileLibrarySection = "playlists" | "favorites" | "downloaded" | "recent" | "albums" | "artists";
 
 type PlaylistSummary = { id: string; name: string; count: number };
 
@@ -271,7 +271,7 @@ export default function MobileLayout(props: MobileLayoutProps) {
         onOpenAlbum={onOpenAlbum}
       />
     );
-  } else if (selectedPlaylistId || activeTab === "library" && librarySection === "playlists") {
+  } else if (selectedPlaylistId) {
     content = (
       <MobilePlaylists
         playlists={playlists}
@@ -284,6 +284,24 @@ export default function MobileLayout(props: MobileLayoutProps) {
         onPlaySong={onPlayTrack}
         onRenamePlaylist={onRenamePlaylist}
         onDeletePlaylist={onDeletePlaylist}
+      />
+    );
+  } else if (activeTab === "queue") {
+    content = (
+      <MobileQueue
+        queue={queue}
+        currentSong={currentSong}
+        currentSongId={currentSong?.id}
+        currentTime={currentTime}
+        duration={duration}
+        isPlaying={isPlaying}
+        onPlay={(song) => onPlayTrack(song, queue)}
+        onClear={onClearQueue}
+        onMove={onReorderQueue}
+        onRemove={onRemoveFromQueue}
+        onPrevious={onPrevious}
+        onNext={onNext}
+        onTogglePlay={onTogglePlay}
       />
     );
   } else if (activeTab === "search") {
@@ -313,74 +331,42 @@ export default function MobileLayout(props: MobileLayoutProps) {
       />
     );
   } else if (activeTab === "library") {
-    if (librarySection === "favorites") {
-      content = (
-        <div className="mobile-screen">
-          <div className="mobile-screen__header">
-            <div className="mobile-screen__header-left">
-              <button type="button" onClick={() => onLibrarySectionChange("favorites")} aria-label="Favorites">
-                ♥
-              </button>
-              <div>
-                <strong>Favorites</strong>
-                <span>{favorites.length} songs</span>
-              </div>
-            </div>
-          </div>
-          <div className="mobile-recent-list">
-            {favorites.map((song) => (
-              <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song, favorites)}>
-                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
-                <div className="mobile-song-row__copy">
-                  <strong>{song.title}</strong>
-                  <span>{song.artist}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    } else if (librarySection === "recent") {
-      content = (
-        <div className="mobile-screen">
-          <div className="mobile-screen__header">
-            <div>
-              <strong>Recently Played</strong>
-              <span>{recentlyPlayed.length} songs</span>
-            </div>
-          </div>
-          <div className="mobile-recent-list">
-            {recentlyPlayed.map((song) => (
-              <button key={song.id} type="button" className="mobile-song-row" onClick={() => onPlayTrack(song)}>
-                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
-                <div className="mobile-song-row__copy">
-                  <strong>{song.title}</strong>
-                  <span>{song.artist}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    } else {
-      content = (
-        <MobileLibrary
-          activeSection={librarySection}
-          favoriteCount={favorites.length}
-          playlistCount={playlists.length}
-          albumCount={albums.length}
-          artistCount={artists.length}
-          recentCount={recentlyPlayed.length}
-          onSectionChange={onLibrarySectionChange}
-          onCreatePlaylist={onOpenCreatePlaylist}
-        />
-      );
-    }
+    content = (
+      <MobileLibrary
+        activeSection={librarySection}
+        favorites={favorites}
+        recentlyPlayed={recentlyPlayed}
+        playlists={playlists}
+        artists={artists}
+        onSectionChange={onLibrarySectionChange}
+        onCreatePlaylist={onOpenCreatePlaylist}
+        onOpenPlaylist={onOpenPlaylist}
+        onOpenArtist={onOpenArtist}
+        onPlayTrack={onPlayTrack}
+      />
+    );
+  } else if (activeTab === "more") {
+    content = (
+      <MobileMore
+        appName={appName}
+        favoriteCount={favorites.length}
+        playlistCount={playlists.length}
+        recentCount={recentlyPlayed.length}
+        onOpenFavorites={() => { onTabChange("library"); onLibrarySectionChange("favorites"); }}
+        onOpenPlaylists={() => { onTabChange("library"); onLibrarySectionChange("playlists"); }}
+        onOpenArtists={() => { onTabChange("library"); onLibrarySectionChange("artists"); }}
+        onOpenRecent={() => { onTabChange("library"); onLibrarySectionChange("recent"); }}
+        onOpenDownloaded={() => { onTabChange("library"); onLibrarySectionChange("downloaded"); }}
+        onOpenSettings={onOpenRefresh}
+        onOpenHelp={onShareCurrent}
+      />
+    );
   } else {
     content = (
       <MobileHome
         appName={appName}
         recentlyPlayed={recentlyPlayed}
+        favorites={favorites}
         refreshStatus={refreshStatus}
         searchQuery={props.searchInput}
         favoriteCount={favorites.length}

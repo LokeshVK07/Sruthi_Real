@@ -1,6 +1,6 @@
-import { Home, Library, ListMusic, Search } from "lucide-react";
+import { Home, Library, ListMusic, MoreHorizontal, Search } from "lucide-react";
 
-export type MobileTabKey = "home" | "search" | "library" | "queue";
+export type MobileTabKey = "home" | "search" | "library" | "queue" | "more";
 
 type MobileBottomNavProps = {
   activeTab: MobileTabKey;
@@ -12,6 +12,7 @@ const items: Array<{ key: MobileTabKey; label: string; icon: typeof Home }> = [
   { key: "search", label: "Search", icon: Search },
   { key: "library", label: "Library", icon: Library },
   { key: "queue", label: "Queue", icon: ListMusic },
+  { key: "more", label: "More", icon: MoreHorizontal },
 ];
 
 export default function MobileBottomNav({ activeTab, onChange }: MobileBottomNavProps) {
@@ -26,6 +27,7 @@ export default function MobileBottomNav({ activeTab, onChange }: MobileBottomNav
             className={activeTab === item.key ? "mobile-bottom-nav__item is-active" : "mobile-bottom-nav__item"}
             onClick={() => onChange(item.key)}
             aria-label={item.label}
+            aria-current={activeTab === item.key ? "page" : undefined}
           >
             <Icon size={18} />
             <span>{item.label}</span>

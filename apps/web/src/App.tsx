@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Heart, Home, Library, ListMusic, Menu, MoreHorizontal, Plus, Search, Users } from "lucide-react";
+import { Bell, Clock3, Heart, Home, Library, ListMusic, Menu, MoreHorizontal, Plus, Search, Users } from "lucide-react";
 import { apiClient } from "./api";
 import { useDebounce } from "./hooks/useDebounce";
 import { normalizeSearchText } from "./searchUtils";
@@ -19,7 +19,7 @@ import type { MobileTabKey } from "./components/mobile/MobileBottomNav";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayerStore } from "./store";
 import type { Album, AlbumDetail, ComposerCollection, ComposerDetail, HomeResponse, RefreshStatus, Song } from "./types";
-import { fallbackArt, imageForAlbum, imageForSong } from "./utils/artwork";
+import { fallbackArt, imageForAlbum } from "./utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 type ViewMode = "grid" | "list";
@@ -48,6 +48,7 @@ type StoredPlaylistShape = {
 };
 
 const MAX_RECENTLY_PLAYED = 50;
+const MOBILE_VIEWPORT_MAX = 1024;
 const RECENTLY_PLAYED_STORAGE_KEY = "sruthi_recently_played";
 const MOBILE_SEARCH_HISTORY_KEY = "vibe2_search_history";
 const PLAYLISTS_KEY = "sruthi-playlists";
@@ -64,13 +65,13 @@ const navItems = [
   { key: "artists", label: "Artists", icon: Users }
 ] as const;
 
-function songStreamUrl(song: Song, extraParams: Record<string, string | number> = {}) {
+function safeDuration(song?: Song | null) {
+  return song?.durationSeconds && song.durationSeconds > 0 ? song.durationSeconds : 240;
+}
+
+function songStreamUrl(song: Song) {
   const version = encodeURIComponent(String(song.updatedAt ?? song.id));
-  const params = new URLSearchParams({ v: version });
-  for (const [key, value] of Object.entries(extraParams)) {
-    params.set(key, String(value));
-  }
-  return `${song.streamUrl}?${params.toString()}`;
+  return `${song.streamUrl}?v=${version}`;
 }
 
 function formatTextSearch(song: Song) {
@@ -168,7 +169,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  const [desktopQueueOpen, setDesktopQueueOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth >= 1200 : true));
+  const [desktopQueueOpen, setDesktopQueueOpen] = useState(true);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [customPlaylists, setCustomPlaylists] = useState<UiPlaylist[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -180,9 +181,9 @@ export default function App() {
   const [heroFeedback, setHeroFeedback] = useState<string | null>(null);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Song[]>(() => readStoredTracks(RECENTLY_PLAYED_STORAGE_KEY));
   const [recentlyPlayedHydrated, setRecentlyPlayedHydrated] = useState(() => typeof window !== "undefined");
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= MOBILE_VIEWPORT_MAX : false));
   const [mobileTab, setMobileTab] = useState<MobileTabKey>("home");
-  const [mobileLibrarySection, setMobileLibrarySection] = useState<MobileLibrarySection>("favorites");
+  const [mobileLibrarySection, setMobileLibrarySection] = useState<MobileLibrarySection>("playlists");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [mobileFullPlayerOpen, setMobileFullPlayerOpen] = useState(false);
   const [mobileQueueOpen, setMobileQueueOpen] = useState(false);
@@ -205,8 +206,6 @@ export default function App() {
   const lastRefreshVersionRef = useRef("");
   const prefetchedSongIdsRef = useRef<Set<string>>(new Set());
   const prefetchedAlbumIdsRef = useRef<Map<string, { leadLimit: number; refreshLinks: boolean }>>(new Map());
-  const pendingPlaybackPrefetchRef = useRef<Map<string, { track: Song; sourceQueue: Song[] }>>(new Map());
-  const completedPlaybackPrefetchRef = useRef<Set<string>>(new Set());
   const deckARef = useRef<HTMLAudioElement | null>(null);
   const deckBRef = useRef<HTMLAudioElement | null>(null);
   // Tracks how many transparent retries we've done for a given song so a flaky
@@ -224,19 +223,11 @@ export default function App() {
     queryKey: ["songs"],
     queryFn: apiClient.songs,
     staleTime: 1000 * 60 * 10,
-    enabled:
-      activeNav === "library" ||
-      activeNav === "search" ||
-      activeNav === "favorites" ||
-      activeNav === "playlists" ||
-      selectedFilter === "tracks" ||
-      Boolean(selectedPlaylistId),
   });
   const { data: albums } = useQuery<{ items: Album[] }>({
     queryKey: ["albums"],
     queryFn: apiClient.albums,
     staleTime: 1000 * 60 * 10,
-    enabled: activeNav === "albums" || selectedFilter === "albums" || Boolean(selectedAlbumId),
   });
   const { data: favorites } = useQuery<{ items: Song[] }>({
     queryKey: ["favorites"],
@@ -267,7 +258,6 @@ export default function App() {
     queryKey: ["composers"],
     queryFn: apiClient.composers,
     staleTime: 1000 * 60 * 60,
-    enabled: activeNav === "artists" || selectedFilter === "artists" || Boolean(selectedComposerSlug),
   });
   const { data: composerDetail } = useQuery<ComposerDetail>({
     queryKey: ["composer", selectedComposerSlug],
@@ -448,21 +438,6 @@ export default function App() {
     requestAlbumPrefetch(track.albumId, 8, true);
   }
 
-  function queuePlaybackPrefetch(track: Song, sourceQueue: Song[]) {
-    pendingPlaybackPrefetchRef.current.set(track.id, { track, sourceQueue });
-  }
-
-  function flushPlaybackPrefetch(songId: string | undefined) {
-    if (!songId || completedPlaybackPrefetchRef.current.has(songId)) return;
-    const pending = pendingPlaybackPrefetchRef.current.get(songId);
-    if (!pending) return;
-    pendingPlaybackPrefetchRef.current.delete(songId);
-    completedPlaybackPrefetchRef.current.add(songId);
-    window.setTimeout(() => {
-      schedulePlaybackPrefetches(pending.track, pending.sourceQueue);
-    }, 750);
-  }
-
   function updateRecentlyPlayed(track: Song) {
     setRecentlyPlayed((previous) => updateRecentlyPlayedList(previous, track));
   }
@@ -477,6 +452,7 @@ export default function App() {
         activeDeck.volume = isMuted ? 0 : volume;
         void safePlay(activeDeck);
         recordPlayback.mutate(song.id);
+        prefetchRelated.mutate(song.id);
       }
       return;
     }
@@ -513,6 +489,7 @@ export default function App() {
       debugPlayback("play-start", song.id);
       void safePlay(inactiveDeck);
       recordPlayback.mutate(song.id);
+      prefetchRelated.mutate(song.id);
     }
   }
 
@@ -529,13 +506,13 @@ export default function App() {
             : [track, ...queue]
           : [track];
 
-    if (autoPlay) {
-      queuePlaybackPrefetch(track, scopedQueue);
-    }
     activateSongDeck(track, autoPlay);
     playSong(track, scopedQueue);
     if (addToRecent) {
       updateRecentlyPlayed(track);
+    }
+    if (autoPlay) {
+      window.setTimeout(() => schedulePlaybackPrefetches(track, scopedQueue), 300);
     }
     setHeroMenuOpen(false);
   }
@@ -573,6 +550,7 @@ export default function App() {
     void safePlay(activeDeck);
     if (currentSong) {
       recordPlayback.mutate(currentSong.id);
+      prefetchRelated.mutate(currentSong.id);
     }
     setPlaying(true);
   }
@@ -662,12 +640,17 @@ export default function App() {
 
   const recordPlayback = useMutation<{ ok: boolean }, Error, string>({
     mutationFn: () => apiClient.recordPlayback(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["home"] });
+    }
   });
+  const prefetchRelated = useMutation<{ queued: number }, Error, string>({ mutationFn: (songId: string) => apiClient.prefetchRelated(songId) });
   const prefetchSongs = useMutation<{ queued: number }, Error, string[]>({ mutationFn: (songIds: string[]) => apiClient.prefetchSongs(songIds) });
   const prefetchAlbum = useMutation<{ ok: boolean; queued: number; songCount: number }, Error, { albumId: string; leadLimit?: number; refreshLinks?: boolean }>({
     mutationFn: ({ albumId, leadLimit = 4, refreshLinks = false }: { albumId: string; leadLimit?: number; refreshLinks?: boolean }) =>
       apiClient.prefetchAlbum(albumId, leadLimit, refreshLinks)
   });
+  const warmup = useMutation<{ ok: boolean; queued: number }, Error, number>({ mutationFn: (limit: number) => apiClient.warmup(limit) });
   const manualRefreshCheck = useMutation<RefreshStatus, Error, void>({
     mutationFn: apiClient.refreshCheck,
     onSuccess: () => {
@@ -677,15 +660,11 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const apply = () => {
-      setIsMobileViewport(false);
-      if (window.innerWidth < 1200) {
-        setDesktopQueueOpen(false);
-      }
-    };
+    const media = window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX}px)`);
+    const apply = () => setIsMobileViewport(media.matches);
     apply();
-    window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
   }, []);
 
   useEffect(() => {
@@ -708,8 +687,12 @@ export default function App() {
   useEffect(() => {
     const snapshotQueue = readStoredTracks(QUEUE_SNAPSHOT_KEY, 100);
     if (!snapshotQueue.length) return;
-    queueHydratedRef.current = true;
     setQueue(snapshotQueue, 0, false);
+    const firstPlayable = snapshotQueue[0];
+    if (firstPlayable) {
+      requestSongPrefetch(snapshotQueue.slice(0, 8).map((song) => song.id));
+      requestAlbumPrefetch(firstPlayable.albumId, 8, true);
+    }
   }, [setQueue]);
 
   useEffect(() => {
@@ -814,12 +797,33 @@ export default function App() {
   useEffect(() => {
     if (warmedUpRef.current || !fullLibrary.length) return;
     warmedUpRef.current = true;
+    warmup.mutate(48);
     const initial = pickInitialSong(fullLibrary);
     if (!initial) return;
     if (queueHydratedRef.current && queue.length) return;
     const initialQueue = queueFromAlbum(initial.albumId, fullLibrary);
     setQueue(initialQueue, Math.max(0, initialQueue.findIndex((song) => song.id === initial.id)), false);
-  }, [fullLibrary, queue.length, setQueue]);
+    window.setTimeout(() => {
+      requestSongPrefetch(fullLibrary.slice(0, 8).map((song) => song.id));
+      albumItems.slice(0, 3).forEach((album) => requestAlbumPrefetch(album.albumId, 4, false));
+    }, 250);
+  }, [fullLibrary, albumItems, queue.length, setQueue]);
+
+  useEffect(() => {
+    if (!selectedAlbumId) return;
+    requestAlbumPrefetch(selectedAlbumId, 8, true);
+  }, [selectedAlbumId]);
+
+  useEffect(() => {
+    const prioritySongs = uniqueById([...recentSongs.slice(0, 8), ...favoriteSongs.slice(0, 8), ...enrichedQueue.slice(0, 8)]).slice(0, 8);
+    if (!prioritySongs.length) return;
+    const timer = window.setTimeout(() => {
+      requestSongPrefetch(prioritySongs.map((song) => song.id));
+      const leadSong = prioritySongs[0];
+      if (leadSong) requestAlbumPrefetch(leadSong.albumId, 8, true);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [recentSongs, favoriteSongs, enrichedQueue]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -865,10 +869,20 @@ export default function App() {
 
   useEffect(() => {
     if (!currentSong) return;
+    const activeDeck = getActiveDeck();
+    if (!deckHasSong(activeDeck, currentSong)) return;
     const nextCandidates = queue.slice(currentIndex + 1, currentIndex + 5);
     if (!nextCandidates.length) return;
-    if (!playing) return;
-    queuePlaybackPrefetch(currentSong, queue);
+    requestSongPrefetch(nextCandidates.map((song) => song.id));
+    const inactiveDeck = getInactiveDeck();
+    const nextSong = nextCandidates[0];
+    if (!inactiveDeck || !nextSong || deckHasSong(inactiveDeck, nextSong)) return;
+    inactiveDeck.pause();
+    inactiveDeck.dataset.songId = nextSong.id;
+    inactiveDeck.src = songStreamUrl(nextSong);
+    inactiveDeck.preload = "auto";
+    inactiveDeck.currentTime = 0;
+    inactiveDeck.load();
   }, [currentSong?.id, currentIndex, queue.length, activeDeckIndex]);
 
   useEffect(() => {
@@ -1052,6 +1066,15 @@ export default function App() {
   function handleSongSelect(song: Song, sourceQueue?: Song[]) {
     const scopedQueue = sourceQueue?.length ? sourceQueue : queueFromAlbum(song.albumId, fullLibrary);
     playTrack(song, { autoPlay: true, addToRecent: true, sourceQueue: scopedQueue.length ? scopedQueue : [song] });
+    if (song.albumId) {
+      const albumId = song.albumId;
+      const prefetch = () => requestAlbumPrefetch(albumId, 4, false);
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(prefetch, { timeout: 800 });
+      } else {
+        setTimeout(prefetch, 250);
+      }
+    }
   }
 
   function handleToggleMute() {
@@ -1243,11 +1266,8 @@ export default function App() {
   }
 
   function handleMobileTabChange(tab: MobileTabKey) {
-    if (tab === "queue") {
-      setMobileQueueOpen(true);
-      return;
-    }
     setMobileTab(tab);
+    setMobileQueueOpen(false);
     setMobileSearchOpen(tab === "search");
     if (tab === "home") {
       setSelectedAlbumId(null);
@@ -1255,7 +1275,7 @@ export default function App() {
       setSelectedPlaylistId(null);
     }
     if (tab === "library") {
-      setMobileLibrarySection((section) => section || "favorites");
+      setMobileLibrarySection((section) => section || "playlists");
     }
   }
 
@@ -1377,7 +1397,11 @@ export default function App() {
     navigatePlaylists: () => navigateDesktop("playlists"),
     navigateArtists: () => navigateDesktop("artists"),
     toggleQueue: () => {
-      if (isMobileViewport) setMobileQueueOpen((open) => !open);
+      if (isMobileViewport) {
+        setMobileQueueOpen(false);
+        setMobileFullPlayerOpen(false);
+        setMobileTab("queue");
+      }
       else setDesktopQueueOpen((open) => !open);
     },
     openAddToPlaylist: openAddCurrentToPlaylistPicker,
@@ -1401,7 +1425,7 @@ export default function App() {
             {filteredFavoriteSongs.map((song) => (
               <button key={song.id} className={viewMode === "grid" ? "recent-card" : "recent-row"} onClick={() => handleSongSelect(song, favoriteSongs)}>
                 <div className="recent-card__media">
-                  <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
+                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1431,7 +1455,7 @@ export default function App() {
                 onClick={() => handleSongSelect(song, queueFromAlbum(song.albumId, fullLibrary))}
               >
                 <div className="recent-card__media">
-                  <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
+                  <AbstractCover seed={song.id || song.title} size="md" active={song.id === currentSong?.id} />
                 </div>
                 <div className="recent-card__copy">
                   <strong>{song.title}</strong>
@@ -1445,42 +1469,71 @@ export default function App() {
     }
 
     if (activeNav === "home" && selectedFilter === "all" && !searchQuery.trim()) {
+      const forYouCards = [
+        { title: "Nature Acoustic", subtitle: "Organic calm", song: fullLibrary[0] ?? currentSong, variant: "wave" as const },
+        { title: "Early Morning Calm", subtitle: "Soft starts", song: fullLibrary[1] ?? currentSong, variant: "rings" as const },
+        { title: "Deep Focus", subtitle: "Quiet flow", song: fullLibrary[2] ?? currentSong, variant: "dots" as const },
+        { title: "Peaceful Piano", subtitle: "Warm keys", song: fullLibrary[3] ?? currentSong, variant: "bars" as const },
+        { title: "Rainy Day Vibes", subtitle: "Gentle mood", song: fullLibrary[4] ?? currentSong, variant: "lines" as const },
+      ].filter((item): item is { title: string; subtitle: string; song: Song; variant: "wave" | "rings" | "dots" | "bars" | "lines" } => Boolean(item.song));
       const playlistRows = uniqueById([currentSong, ...filteredRecentSongs, ...favoriteSongs, ...fullLibrary].filter(Boolean) as Song[]).slice(0, 8);
       return (
-        <section className="content-section playlist-section">
-          <div className="section-header">
-            <h2>Your Playlist</h2>
-            <button className="section-link section-link--pill" type="button" onClick={() => setPlaylistModalOpen(true)}>
-              <Plus size={17} /> Add
-            </button>
-          </div>
-          <div className="playlist-table">
-            <div className="playlist-table__head">
-              <span>#</span>
-              <span />
-              <span>Title</span>
-              <span>Artist</span>
-              <span>Album</span>
-              <span />
-              <span />
+        <>
+          <section className="for-you-section">
+            <div className="section-header">
+              <h2>For You</h2>
+              <button className="section-link" type="button" onClick={() => navigateDesktop("library")}>View all</button>
             </div>
-            {playlistRows.map((song, index) => (
-              <div key={song.id} className={song.id === currentSong?.id ? "playlist-row is-active" : "playlist-row"}>
-                <span>{index + 1}</span>
-                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
-                <button type="button" onClick={() => handleSongSelect(song, playlistRows)}>{song.title}</button>
-                <span>{song.artist}</span>
-                <span>{song.albumTitle}</span>
-                <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
-                  <Heart size={17} fill={song.favorite ? "currentColor" : "none"} />
+            <div className="for-you-grid">
+              {forYouCards.map((card) => (
+                <button key={card.title} className="for-you-card" type="button" onClick={() => handleSongSelect(card.song, fullLibrary)}>
+                  <AbstractCover seed={card.song.id || card.title} variant={card.variant} size="lg" />
+                  <span>
+                    <strong>{card.title}</strong>
+                    <small>{card.subtitle}</small>
+                  </span>
+                  <span className="for-you-card__play">▶</span>
                 </button>
-                <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
-                  <MoreHorizontal size={18} />
-                </button>
+              ))}
+            </div>
+          </section>
+          <section className="content-section playlist-section">
+            <div className="section-header">
+              <h2>Your Playlist</h2>
+              <button className="section-link section-link--pill" type="button" onClick={() => setPlaylistModalOpen(true)}>
+                <Plus size={17} /> Add
+              </button>
+            </div>
+            <div className="playlist-table">
+              <div className="playlist-table__head">
+                <span>#</span>
+                <span />
+                <span>Title</span>
+                <span>Artist</span>
+                <span>Album</span>
+                <span />
+                <span><Clock3 size={15} /></span>
+                <span />
               </div>
-            ))}
-          </div>
-        </section>
+              {playlistRows.map((song, index) => (
+                <div key={song.id} className={song.id === currentSong?.id ? "playlist-row is-active" : "playlist-row"}>
+                  <span>{index + 1}</span>
+                  <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                  <button type="button" onClick={() => handleSongSelect(song, playlistRows)}>{song.title}</button>
+                  <span>{song.artist}</span>
+                  <span>{song.albumTitle}</span>
+                  <button className={song.favorite ? "track-row__favorite is-active" : "track-row__favorite"} onClick={() => toggleFavorite.mutate(song.id)}>
+                    <Heart size={17} fill={song.favorite ? "currentColor" : "none"} />
+                  </button>
+                  <span>{safeDuration(song) ? `${Math.floor(safeDuration(song) / 60)}:${String(safeDuration(song) % 60).padStart(2, "0")}` : "—:—"}</span>
+                  <button className="track-row__more" type="button" onClick={() => handleOpenAddToPlaylistForTrack(song)}>
+                    <MoreHorizontal size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </>
       );
     }
 
@@ -1503,8 +1556,8 @@ export default function App() {
             <div className="track-table">
               {selectedAlbumForView.songs.map((song) => (
                 <div key={song.id} className="track-row">
-                  <button className="track-row__main" onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
-                    <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                  <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
+                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1537,7 +1590,7 @@ export default function App() {
                   handleOpenAlbumView(album.albumId);
                 }}
               >
-                <AbstractCover src={imageForAlbum(album)} alt={album.name} seed={album.albumId || album.name} size="md" />
+                <AbstractCover seed={album.albumId || album.name} size="md" />
                 <div>
                   <strong>{album.name}</strong>
                   <span>{album.musicDirector || album.singersSummary || "Tamil soundtrack"}</span>
@@ -1569,9 +1622,10 @@ export default function App() {
                 <div key={song.id} className="track-row">
                   <button
                     className="track-row__main"
+                    onMouseEnter={() => requestSongPrefetch([song.id])}
                     onClick={() => handleSongSelect(song, composerSongs)}
                   >
-                    <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                    <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
                       <span>{song.artist}</span>
@@ -1651,8 +1705,8 @@ export default function App() {
               <div className="track-table">
                 {selectedPlaylistSongs.map((song) => (
                   <div key={song.id} className="track-row">
-                    <button className="track-row__main" onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
-                      <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+                    <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
+                      <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                       <div>
                         <strong>{song.title}</strong>
                         <span>{song.artist}</span>
@@ -1702,8 +1756,8 @@ export default function App() {
         <div className="track-table">
           {filteredSongs.slice(0, 24).map((song) => (
             <div key={song.id} className="track-row">
-              <button className="track-row__main" onClick={() => handleSongSelect(song, filteredSongs)}>
-                <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
+              <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, filteredSongs)}>
+                <AbstractCover seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                 <div>
                   <strong>{song.title}</strong>
                   <span>{song.artist}</span>
@@ -1795,10 +1849,8 @@ export default function App() {
           }}
           onPlaying={() => {
             if (deckIndex !== activeDeckIndex) return;
-            const playingSongId = getDeck(deckIndex)?.dataset.songId;
-            debugPlayback("playing", playingSongId);
+            debugPlayback("playing", getDeck(deckIndex)?.dataset.songId);
             setBuffering(false);
-            flushPlaybackPrefetch(playingSongId);
           }}
           onEnded={(event) => {
             if (deckIndex !== activeDeckIndex) return;
@@ -1815,18 +1867,17 @@ export default function App() {
             const failedSongId = failedDeck.dataset.songId;
             debugPlayback("error", failedSongId);
             setBuffering(false);
-            // Most "errors" are transient: the upstream URL may be expired or
-            // the first range request may have raced a backend repair. Keep
-            // retrying the selected song only. Never auto-skip, because that
-            // makes a repairable stream failure feel like random playback.
+            // Most "errors" we see are transient: the masstamilan URL has
+            // expired, or a CF-blocked album's first attempt is racing the
+            // Playwright fallback. The backend always refreshes URLs and
+            // retries on its own — silently re-load with a fresh cache-bust
+            // up to 3 times. Each retry has progressively more backoff so
+            // the server has time to fall back to Playwright if needed.
             const retries = playbackRetryRef.current.get(failedSongId ?? "") ?? 0;
-            if (failedSongId && retries < 5 && currentSong && currentSong.id === failedSongId) {
+            if (failedSongId && retries < 3 && currentSong && currentSong.id === failedSongId) {
               playbackRetryRef.current.set(failedSongId, retries + 1);
-              const bust = songStreamUrl(currentSong, {
-                retry: Date.now(),
-                ...(retries >= 1 ? { refresh: 1 } : {}),
-              });
-              const backoffMs = retries === 0 ? 200 : retries === 1 ? 700 : retries === 2 ? 1400 : 2400;
+              const bust = `${songStreamUrl(currentSong)}${songStreamUrl(currentSong).includes("?") ? "&" : "?"}retry=${Date.now()}`;
+              const backoffMs = retries === 0 ? 200 : retries === 1 ? 800 : 1600;
               debugPlayback("retry", failedSongId, retries + 1, `backoff=${backoffMs}ms`);
               setBuffering(true);
               window.setTimeout(() => {
@@ -1837,9 +1888,11 @@ export default function App() {
               }, backoffMs);
               return;
             }
+            // After 3 retries the track really is unrecoverable for now —
+            // skip to the next one rather than stranding the user.
             setPlaying(false);
-            setHeroFeedback("This song is taking longer than expected. Please try again.");
-            debugPlayback("error-final", failedSongId);
+            debugPlayback("auto-skip", failedSongId);
+            handleNextTrack();
           }}
         />
       ))}
@@ -1916,7 +1969,11 @@ export default function App() {
             onCycleRepeat={cycleRepeatMode}
             onOpenFullPlayer={() => setMobileFullPlayerOpen(true)}
             onCloseFullPlayer={() => setMobileFullPlayerOpen(false)}
-            onOpenQueue={() => setMobileQueueOpen(true)}
+            onOpenQueue={() => {
+              setMobileQueueOpen(false);
+              setMobileFullPlayerOpen(false);
+              setMobileTab("queue");
+            }}
             onCloseQueue={() => setMobileQueueOpen(false)}
             onClearQueue={handleClearQueue}
             onRemoveFromQueue={removeFromQueue}

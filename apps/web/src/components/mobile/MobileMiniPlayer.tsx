@@ -1,7 +1,7 @@
+import { useRef } from "react";
 import { ChevronUp, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import type { Song } from "../../types";
 import AbstractCover from "../AbstractCover";
-import { imageForSong } from "../../utils/artwork";
 
 type MobileMiniPlayerProps = {
   song: Song;
@@ -26,12 +26,26 @@ export default function MobileMiniPlayer({
   onNext,
   onOpenPlayer,
 }: MobileMiniPlayerProps) {
+  const touchStartY = useRef<number | null>(null);
   const progress = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
 
   return (
-    <div className="mobile-mini-player">
+    <div
+      className="mobile-mini-player"
+      onTouchStart={(event) => {
+        touchStartY.current = event.touches[0]?.clientY ?? null;
+      }}
+      onTouchEnd={(event) => {
+        const startY = touchStartY.current;
+        touchStartY.current = null;
+        const endY = event.changedTouches[0]?.clientY;
+        if (startY != null && endY != null && startY - endY > 42) {
+          onOpenPlayer();
+        }
+      }}
+    >
       <button type="button" className="mobile-mini-player__main" onClick={onOpenPlayer}>
-        <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
+        <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
         <div className="mobile-mini-player__copy">
           <strong title={song.title}>{song.title}</strong>
           <span title={song.artist}>{song.artist}</span>

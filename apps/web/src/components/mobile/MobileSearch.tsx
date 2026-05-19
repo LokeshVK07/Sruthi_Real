@@ -1,7 +1,6 @@
 import { Search, X, Loader2 } from "lucide-react";
 import type { Album, ComposerCollection, Song } from "../../types";
 import AbstractCover from "../AbstractCover";
-import { imageForAlbum, imageForSong } from "../../utils/artwork";
 
 type FilterKey = "all" | "tracks" | "albums" | "artists" | "playlists";
 
@@ -85,7 +84,7 @@ export default function MobileSearch({
           <input
             value={inputValue}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search songs, albums, artists..."
+            placeholder="Search tracks, artists, albums, playlists..."
             autoFocus
             inputMode="search"
             type="search"
@@ -162,7 +161,7 @@ export default function MobileSearch({
           <h2>Tracks</h2>
           {songs.slice(0, 30).map((song) => (
             <button key={song.id} type="button" className="mobile-result-row" onClick={() => onPlaySong(song)}>
-              <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
+              <AbstractCover seed={song.id || song.title} size="sm" className="mobile-artwork" />
               <div>
                 <strong>{song.title}</strong>
                 <span>{song.artist}</span>
@@ -182,7 +181,7 @@ export default function MobileSearch({
               className="mobile-result-row"
               onClick={() => onOpenAlbum(album.albumId)}
             >
-              <AbstractCover src={imageForAlbum(album)} alt={album.name} seed={album.albumId || album.name} size="sm" className="mobile-artwork" />
+              <AbstractCover seed={album.albumId || album.name} size="sm" className="mobile-artwork" />
               <div>
                 <strong>{album.name}</strong>
                 <span>{album.musicDirector || album.singersSummary || "Album"}</span>

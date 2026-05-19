@@ -12,10 +12,10 @@ import {
   SkipForward,
   Volume2,
 } from "lucide-react";
+import { useRef } from "react";
 import type { Song } from "../../types";
 import type { RepeatMode } from "../../store";
 import AbstractCover from "../AbstractCover";
-import { imageForSong } from "../../utils/artwork";
 
 type MobileFullPlayerProps = {
   open: boolean;
@@ -80,6 +80,7 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
     onShare,
     onShowLyrics,
   } = props;
+  const touchStartY = useRef<number | null>(null);
 
   if (!open || !song) return null;
 
@@ -97,18 +98,34 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
 
   return (
     <div className="mobile-overlay">
-      <div className="mobile-full-player">
+      <div
+        className="mobile-full-player"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Now Playing"
+        onTouchStart={(event) => {
+          touchStartY.current = event.touches[0]?.clientY ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const startY = touchStartY.current;
+          touchStartY.current = null;
+          const endY = event.changedTouches[0]?.clientY;
+          if (startY != null && endY != null && endY - startY > 64) {
+            onClose();
+          }
+        }}
+      >
         <div className="mobile-full-player__header">
           <button type="button" onClick={onClose} aria-label="Close player">
             <ChevronDown size={22} />
           </button>
           <strong>Now Playing</strong>
-          <button type="button" onClick={onShare} aria-label="Share track">
-            <Share2 size={18} />
+          <button type="button" onClick={onShare} aria-label="More options">
+            <MoreHorizontal size={18} />
           </button>
         </div>
 
-        <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="hero" className="mobile-full-player__artwork" />
+        <AbstractCover seed={song.id || song.title} size="hero" variant="hills" className="mobile-full-player__artwork" />
 
         <div className="mobile-full-player__copy">
           <strong title={song.title}>{song.title}</strong>
@@ -128,7 +145,7 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
             disabled={!hasDuration}
             onChange={(event) => onSeek(Number(event.target.value))}
             style={{
-              background: `linear-gradient(90deg, #e056ff 0%, #ff6ee7 ${progressPercent}%, rgba(255,255,255,0.16) ${progressPercent}%, rgba(255,255,255,0.16) 100%)`,
+              background: `linear-gradient(90deg, var(--mobile-accent) 0%, var(--mobile-accent) ${progressPercent}%, rgba(35,55,45,0.12) ${progressPercent}%, rgba(35,55,45,0.12) 100%)`,
             }}
           />
           <div className="mobile-full-player__times">
@@ -158,6 +175,7 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
         <div className="mobile-full-player__volume">
           <Volume2 size={18} />
           <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => onVolumeChange(Number(event.target.value))} />
+          <Volume2 size={18} />
         </div>
 
         <div className="mobile-full-player__actions">
@@ -167,19 +185,19 @@ export default function MobileFullPlayer(props: MobileFullPlayerProps) {
           </button>
           <button type="button" onClick={onOpenAddToPlaylist}>
             <ListMusic size={16} />
-            Playlist
-          </button>
-          <button type="button" onClick={onOpenQueue}>
-            <ListMusic size={16} />
-            Queue
+            Add to Playlist
           </button>
           <button type="button" onClick={onShowLyrics}>
             <MoreHorizontal size={16} />
             Lyrics
           </button>
-          <button type="button" onClick={onViewArtist}>
-            <MoreHorizontal size={16} />
-            Artist
+          <button type="button" onClick={onOpenQueue}>
+            <ListMusic size={16} />
+            Queue
+          </button>
+          <button type="button" onClick={onShare}>
+            <Share2 size={16} />
+            Share
           </button>
         </div>
       </div>
