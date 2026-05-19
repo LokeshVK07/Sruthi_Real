@@ -64,9 +64,13 @@ const navItems = [
   { key: "artists", label: "Artists", icon: Users }
 ] as const;
 
-function songStreamUrl(song: Song) {
+function songStreamUrl(song: Song, extraParams: Record<string, string | number> = {}) {
   const version = encodeURIComponent(String(song.updatedAt ?? song.id));
-  return `${song.streamUrl}?v=${version}`;
+  const params = new URLSearchParams({ v: version });
+  for (const [key, value] of Object.entries(extraParams)) {
+    params.set(key, String(value));
+  }
+  return `${song.streamUrl}?${params.toString()}`;
 }
 
 function formatTextSearch(song: Song) {
@@ -664,7 +668,6 @@ export default function App() {
     mutationFn: ({ albumId, leadLimit = 4, refreshLinks = false }: { albumId: string; leadLimit?: number; refreshLinks?: boolean }) =>
       apiClient.prefetchAlbum(albumId, leadLimit, refreshLinks)
   });
-  const warmup = useMutation<{ ok: boolean; queued: number }, Error, number>({ mutationFn: (limit: number) => apiClient.warmup(limit) });
   const manualRefreshCheck = useMutation<RefreshStatus, Error, void>({
     mutationFn: apiClient.refreshCheck,
     onSuccess: () => {
@@ -703,11 +706,6 @@ export default function App() {
     if (!snapshotQueue.length) return;
     queueHydratedRef.current = true;
     setQueue(snapshotQueue, 0, false);
-    const firstPlayable = snapshotQueue[0];
-    if (firstPlayable) {
-      requestSongPrefetch(snapshotQueue.slice(0, 8).map((song) => song.id));
-      requestAlbumPrefetch(firstPlayable.albumId, 8, true);
-    }
   }, [setQueue]);
 
   useEffect(() => {
@@ -812,33 +810,12 @@ export default function App() {
   useEffect(() => {
     if (warmedUpRef.current || !fullLibrary.length) return;
     warmedUpRef.current = true;
-    warmup.mutate(48);
     const initial = pickInitialSong(fullLibrary);
     if (!initial) return;
     if (queueHydratedRef.current && queue.length) return;
     const initialQueue = queueFromAlbum(initial.albumId, fullLibrary);
     setQueue(initialQueue, Math.max(0, initialQueue.findIndex((song) => song.id === initial.id)), false);
-    window.setTimeout(() => {
-      requestSongPrefetch(fullLibrary.slice(0, 8).map((song) => song.id));
-      albumItems.slice(0, 3).forEach((album) => requestAlbumPrefetch(album.albumId, 4, false));
-    }, 250);
-  }, [fullLibrary, albumItems, queue.length, setQueue]);
-
-  useEffect(() => {
-    if (!selectedAlbumId) return;
-    requestAlbumPrefetch(selectedAlbumId, 8, true);
-  }, [selectedAlbumId]);
-
-  useEffect(() => {
-    const prioritySongs = uniqueById([...recentSongs.slice(0, 8), ...favoriteSongs.slice(0, 8), ...enrichedQueue.slice(0, 8)]).slice(0, 8);
-    if (!prioritySongs.length) return;
-    const timer = window.setTimeout(() => {
-      requestSongPrefetch(prioritySongs.map((song) => song.id));
-      const leadSong = prioritySongs[0];
-      if (leadSong) requestAlbumPrefetch(leadSong.albumId, 8, true);
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [recentSongs, favoriteSongs, enrichedQueue]);
+  }, [fullLibrary, queue.length, setQueue]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -884,20 +861,10 @@ export default function App() {
 
   useEffect(() => {
     if (!currentSong) return;
-    const activeDeck = getActiveDeck();
-    if (!deckHasSong(activeDeck, currentSong)) return;
     const nextCandidates = queue.slice(currentIndex + 1, currentIndex + 5);
     if (!nextCandidates.length) return;
-    requestSongPrefetch(nextCandidates.map((song) => song.id));
-    const inactiveDeck = getInactiveDeck();
-    const nextSong = nextCandidates[0];
-    if (!inactiveDeck || !nextSong || deckHasSong(inactiveDeck, nextSong)) return;
-    inactiveDeck.pause();
-    inactiveDeck.dataset.songId = nextSong.id;
-    inactiveDeck.src = songStreamUrl(nextSong);
-    inactiveDeck.preload = "auto";
-    inactiveDeck.currentTime = 0;
-    inactiveDeck.load();
+    if (!playing) return;
+    queuePlaybackPrefetch(currentSong, queue);
   }, [currentSong?.id, currentIndex, queue.length, activeDeckIndex]);
 
   useEffect(() => {
@@ -1532,7 +1499,7 @@ export default function App() {
             <div className="track-table">
               {selectedAlbumForView.songs.map((song) => (
                 <div key={song.id} className="track-row">
-                  <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
+                  <button className="track-row__main" onClick={() => handleSongSelect(song, selectedAlbumForView.songs)}>
                     <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                     <div>
                       <strong>{song.title}</strong>
@@ -1598,7 +1565,6 @@ export default function App() {
                 <div key={song.id} className="track-row">
                   <button
                     className="track-row__main"
-                    onMouseEnter={() => requestSongPrefetch([song.id])}
                     onClick={() => handleSongSelect(song, composerSongs)}
                   >
                     <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
@@ -1681,7 +1647,7 @@ export default function App() {
               <div className="track-table">
                 {selectedPlaylistSongs.map((song) => (
                   <div key={song.id} className="track-row">
-                    <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
+                    <button className="track-row__main" onClick={() => handleSongSelect(song, selectedPlaylistSongs)}>
                       <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                       <div>
                         <strong>{song.title}</strong>
@@ -1732,7 +1698,7 @@ export default function App() {
         <div className="track-table">
           {filteredSongs.slice(0, 24).map((song) => (
             <div key={song.id} className="track-row">
-              <button className="track-row__main" onMouseEnter={() => requestSongPrefetch([song.id])} onClick={() => handleSongSelect(song, filteredSongs)}>
+              <button className="track-row__main" onClick={() => handleSongSelect(song, filteredSongs)}>
                 <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="xs" active={song.id === currentSong?.id} />
                 <div>
                   <strong>{song.title}</strong>
@@ -1845,17 +1811,18 @@ export default function App() {
             const failedSongId = failedDeck.dataset.songId;
             debugPlayback("error", failedSongId);
             setBuffering(false);
-            // Most "errors" we see are transient: the masstamilan URL has
-            // expired, or a CF-blocked album's first attempt is racing the
-            // Playwright fallback. The backend always refreshes URLs and
-            // retries on its own — silently re-load with a fresh cache-bust
-            // up to 3 times. Each retry has progressively more backoff so
-            // the server has time to fall back to Playwright if needed.
+            // Most "errors" are transient: the upstream URL may be expired or
+            // the first range request may have raced a backend repair. Keep
+            // retrying the selected song only. Never auto-skip, because that
+            // makes a repairable stream failure feel like random playback.
             const retries = playbackRetryRef.current.get(failedSongId ?? "") ?? 0;
-            if (failedSongId && retries < 3 && currentSong && currentSong.id === failedSongId) {
+            if (failedSongId && retries < 5 && currentSong && currentSong.id === failedSongId) {
               playbackRetryRef.current.set(failedSongId, retries + 1);
-              const bust = `${songStreamUrl(currentSong)}${songStreamUrl(currentSong).includes("?") ? "&" : "?"}retry=${Date.now()}`;
-              const backoffMs = retries === 0 ? 200 : retries === 1 ? 800 : 1600;
+              const bust = songStreamUrl(currentSong, {
+                retry: Date.now(),
+                ...(retries >= 1 ? { refresh: 1 } : {}),
+              });
+              const backoffMs = retries === 0 ? 200 : retries === 1 ? 700 : retries === 2 ? 1400 : 2400;
               debugPlayback("retry", failedSongId, retries + 1, `backoff=${backoffMs}ms`);
               setBuffering(true);
               window.setTimeout(() => {
@@ -1866,11 +1833,9 @@ export default function App() {
               }, backoffMs);
               return;
             }
-            // After 3 retries the track really is unrecoverable for now —
-            // skip to the next one rather than stranding the user.
             setPlaying(false);
-            debugPlayback("auto-skip", failedSongId);
-            handleNextTrack();
+            setHeroFeedback("This song is taking longer than expected. Please try again.");
+            debugPlayback("error-final", failedSongId);
           }}
         />
       ))}

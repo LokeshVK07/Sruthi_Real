@@ -1113,16 +1113,26 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
 
 async function handleStream(songId, request, env, ctx) {
   const range = request.headers.get("Range");
-  const origin = new URL(request.url).origin;
+  const requestUrl = new URL(request.url);
+  const origin = requestUrl.origin;
+  const forceRefresh = requestUrl.searchParams.get("refresh") === "1";
   const cacheKey = new Request(`${origin}/api/stream/${songId}`);
-  const cached = await caches.default.match(cacheKey);
+  const cached = forceRefresh ? null : await caches.default.match(cacheKey);
   if (cached) {
-    if (range) {
+    const cachedType = cleanText(cached.headers.get("content-type")).toLowerCase();
+    if (!isAudioContentType(cachedType)) {
+      ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
+    } else if (range) {
       const ranged = await rangeResponseFromCachedAudio(cached, range);
       if (ranged) return ranged;
+      ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
     } else {
       return withCors(cached);
     }
+  }
+
+  if (forceRefresh) {
+    ctx?.waitUntil(caches.default.delete(cacheKey).catch(() => {}));
   }
 
   let row = await env.DB.prepare(
@@ -1137,34 +1147,39 @@ async function handleStream(songId, request, env, ctx) {
 
   if (!row) return json({ error: "Song not found." }, 404);
 
-  // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
-  // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
-  // stale-URL attempt below, so no wall-clock time is wasted.
-  const freshUrlsPromise = fetchFreshAudioUrls(row, env);
+  if (!forceRefresh) {
+    // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
+    // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
+    // stale-URL attempt below, so no wall-clock time is wasted.
+    const freshUrlsPromise = fetchFreshAudioUrls(row, env);
 
-  let response = await tryAudioCandidates(row, request);
-  if (response) {
-    if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
-    else ctx?.waitUntil(warmSongInCache(env, origin, row));
-    return response;
-  }
-
-  // Stored URLs returned 403. Await the fresh URLs (usually already resolved).
-  const freshUrls = await freshUrlsPromise;
-  for (const freshUrl of freshUrls) {
-    response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
+    let response = await tryAudioCandidates(row, request);
     if (response) {
       if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
       else ctx?.waitUntil(warmSongInCache(env, origin, row));
-      // Refresh the DB token rows in the background so future stored-URL
-      // checks will succeed until the KV entry also covers the album.
-      ctx?.waitUntil(tryRefreshSongLink(env, row));
       return response;
+    }
+
+    // Stored URLs returned 403. Await the fresh URLs (usually already resolved).
+    const freshUrls = await freshUrlsPromise;
+    for (const freshUrl of freshUrls) {
+      response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
+      if (response) {
+        if (!range) ctx?.waitUntil(caches.default.put(cacheKey, response.clone()));
+        else ctx?.waitUntil(warmSongInCache(env, origin, row));
+        // Refresh the DB token rows in the background so future stored-URL
+        // checks will succeed until the KV entry also covers the album.
+        ctx?.waitUntil(tryRefreshSongLink(env, row));
+        return response;
+      }
     }
   }
 
   // If the KV token was stale/challenged, delete that cached token and force a
-  // fresh album lookup before the heavier DB refresh path.
+  // fresh album lookup before the heavier DB refresh path. `refresh=1` starts
+  // here immediately so frontend repair retries do not waste time on known-bad
+  // cached/stored URLs.
+  let response = null;
   const bypassedFreshUrls = await fetchFreshAudioUrls(row, env, { bypassCache: true });
   for (const freshUrl of bypassedFreshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
@@ -1203,6 +1218,7 @@ async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
   const body = await cachedResponse.arrayBuffer();
   const total = body.byteLength;
   if (!total) return null;
+  if (!isValidAudioBytes(body)) return null;
 
   let start = match[1] ? Number(match[1]) : 0;
   let end = match[2] ? Number(match[2]) : total - 1;
@@ -1294,11 +1310,6 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
     const buffered = await audioResponseFromBufferedBody(response, null);
     if (buffered) return buffered;
     return null;
-  }
-
-  if (rangeHeader && !response.headers.get("content-range")) {
-    const ranged = await rangeResponseFromAudioResponse(response, rangeHeader);
-    if (ranged) return ranged;
   }
 
   const outHeaders = new Headers(corsHeaders());
