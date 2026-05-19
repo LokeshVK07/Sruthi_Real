@@ -49,6 +49,19 @@ STREAM_REFRESH_WAIT_SECONDS = 18
 STREAM_REFRESH_POLL_SECONDS = 0.5
 UPSTREAM_AUDIO_TIMEOUT_SECONDS = 15
 UPSTREAM_PAGE_TIMEOUT_SECONDS = 18
+CHALLENGE_MARKERS = (
+    "just a moment",
+    "cloudflare",
+    "captcha",
+    "cf-browser-verification",
+    "checking your browser",
+    "enable javascript and cookies to continue",
+    "attention required",
+    "error code: 1020",
+    "403 forbidden",
+    "429 too many requests",
+    "503 service unavailable",
+)
 
 
 def load_local_env():
@@ -303,9 +316,16 @@ def is_valid_audio_bytes(data):
     if data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
         return True
     lowered = data[:512].lower()
-    if b"<!doctype html" in lowered or b"<html" in lowered or b"just a moment" in lowered:
+    if b"<!doctype html" in lowered or b"<html" in lowered:
+        return False
+    if any(marker.encode("utf-8") in lowered for marker in CHALLENGE_MARKERS):
         return False
     return False
+
+
+def is_challenge_page(html):
+    lowered = clean_text(html).lower()
+    return any(marker in lowered for marker in CHALLENGE_MARKERS)
 
 
 def is_valid_audio_file(path):
@@ -1556,6 +1576,8 @@ def fetch_page_html(url):
     with urlopen(request, timeout=UPSTREAM_PAGE_TIMEOUT_SECONDS) as response:
         body = response.read()
     html = body.decode("utf-8", errors="ignore")
+    if is_challenge_page(html):
+        raise ValueError("Challenge page detected.")
     return html
 
 
@@ -1604,6 +1626,9 @@ def try_refresh_song_link(song_id):
             continue
 
         if not html:
+            continue
+
+        if is_challenge_page(html):
             continue
 
         if "window.albumTracks" not in html:
@@ -2263,6 +2288,28 @@ class CatalogHandler(SimpleHTTPRequestHandler):
         if parsed.path.startswith("/api/stream/"):
             song_id = parsed.path.rsplit("/", 1)[-1]
             self.handle_stream_request(song_id)
+            return
+
+        if parsed.path.startswith("/api/song-status/"):
+            song_id = parsed.path.rsplit("/", 1)[-1]
+            song = load_song_record(song_id)
+            if song is None:
+                self.respond_json({"error": "Song not found."}, HTTPStatus.NOT_FOUND)
+                return
+            cached_path = cached_audio_path(song_id)
+            local_320_path = media_file_path(song_id, 320)
+            local_128_path = media_file_path(song_id, 128)
+            self.respond_json(
+                {
+                    "id": song_id,
+                    "cached": is_valid_audio_file(cached_path),
+                    "localAudio320": is_valid_audio_file(local_320_path),
+                    "localAudio128": is_valid_audio_file(local_128_path),
+                    "hasDbAudio": bool(song.get("audio128Url") or song.get("audio320Url")),
+                    "linkStatus": song.get("linkStatus") or "unknown",
+                    "lastRefreshedAt": song.get("lastRefreshedAt"),
+                }
+            )
             return
 
         if parsed.path == "/api/library":

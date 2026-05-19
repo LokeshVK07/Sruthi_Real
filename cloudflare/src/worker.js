@@ -5,6 +5,19 @@ const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
 const STREAM_RANGE_TIMEOUT_MS = 6000;
 const STREAM_FULL_TIMEOUT_MS = 12000;
+const CHALLENGE_MARKERS = [
+  "just a moment",
+  "cloudflare",
+  "captcha",
+  "cf-browser-verification",
+  "checking your browser",
+  "enable javascript and cookies to continue",
+  "attention required",
+  "error code: 1020",
+  "403 forbidden",
+  "429 too many requests",
+  "503 service unavailable",
+];
 const DEFAULT_TAMIL_OFFICIAL_PLAYLISTS = [
   { id: "top-100", name: "Top 100", sourceUrl: "https://www.masstamilan.dev/playlists/top-100-songs" },
   { id: "bgm-50", name: "BGM 50", sourceUrl: "https://www.masstamilan.dev/playlists/top-50-bgm-songs" },
@@ -723,6 +736,41 @@ async function handleApi(request, env, url, ctx) {
     return json({ songs: ids.map((id) => byId.get(id)).filter(Boolean) });
   }
 
+  if (url.pathname.startsWith("/api/song-status/")) {
+    const songId = cleanText(url.pathname.split("/").pop());
+    if (!songId) return json({ error: "Song id is required." }, 400);
+    if (isTeluguSongId(songId)) {
+      return json({
+        id: songId,
+        cached: false,
+        hasDbAudio: true,
+        linkStatus: "proxied",
+        catalog: "telugu",
+      });
+    }
+
+    const row = await env.DB.prepare(
+      `
+      SELECT id, audio_128_url, audio_320_url, remote_audio_128_url, remote_audio_320_url,
+             last_refreshed_at, link_status
+      FROM songs
+      WHERE id = ?
+      `,
+    ).bind(songId).first();
+    if (!row) return json({ error: "Song not found." }, 404);
+
+    const cacheKey = new Request(`${url.origin}/api/stream/${songId}`);
+    const cached = await caches.default.match(cacheKey);
+    return json({
+      id: songId,
+      cached: Boolean(cached),
+      hasDbAudio: Boolean(row.audio_128_url || row.audio_320_url || row.remote_audio_128_url || row.remote_audio_320_url),
+      linkStatus: row.link_status || "unknown",
+      lastRefreshedAt: row.last_refreshed_at || null,
+      catalog: "tamil",
+    });
+  }
+
   if (url.pathname === "/api/cache/status") {
     return json({ cachedCount: 0, inFlight: 0, refreshingAlbums: 0 });
   }
@@ -1140,6 +1188,12 @@ async function handleStream(songId, request, env, ctx) {
     }
   }
 
+  ctx?.waitUntil(
+    env.DB.prepare("UPDATE songs SET link_status = 'unavailable' WHERE id = ?")
+      .bind(songId)
+      .run()
+      .catch(() => {}),
+  );
   return json({ error: "Upstream stream unavailable." }, 502);
 }
 
@@ -1236,6 +1290,11 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
 
   if (!response.ok) return null;
   if (contentType.includes("text/html") || contentType.includes("text/plain")) return null;
+  if (!isAudioContentType(contentType) && !rangeHeader) {
+    const buffered = await audioResponseFromBufferedBody(response, null);
+    if (buffered) return buffered;
+    return null;
+  }
 
   if (rangeHeader && !response.headers.get("content-range")) {
     const ranged = await rangeResponseFromAudioResponse(response, rangeHeader);
@@ -1260,6 +1319,7 @@ async function rangeResponseFromAudioResponse(response, rangeHeader) {
 
   const body = await response.arrayBuffer().catch(() => null);
   if (!body?.byteLength) return null;
+  if (!isValidAudioBytes(body)) return null;
 
   const total = body.byteLength;
   let start = match[1] ? Number(match[1]) : 0;
@@ -1286,6 +1346,39 @@ async function rangeResponseFromAudioResponse(response, rangeHeader) {
   headers.set("Accept-Ranges", "bytes");
   headers.set("Cache-Control", "public, max-age=3600");
   return new Response(body.slice(start, end + 1), { status: 206, headers });
+}
+
+async function audioResponseFromBufferedBody(response, rangeHeader) {
+  const body = await response.arrayBuffer().catch(() => null);
+  if (!body?.byteLength || !isValidAudioBytes(body)) return null;
+  if (rangeHeader) return rangeResponseFromAudioResponse(new Response(body, { headers: response.headers }), rangeHeader);
+
+  const headers = new Headers(corsHeaders());
+  headers.set("Content-Type", response.headers.get("content-type") || "audio/mpeg");
+  headers.set("Content-Length", String(body.byteLength));
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=3600");
+  return new Response(body, { status: 200, headers });
+}
+
+function isAudioContentType(contentType) {
+  const value = cleanText(contentType).toLowerCase();
+  return value.startsWith("audio/") || value.includes("mpeg") || value.includes("octet-stream");
+}
+
+function isChallengeText(value) {
+  const lowered = cleanText(value).toLowerCase();
+  return CHALLENGE_MARKERS.some((marker) => lowered.includes(marker));
+}
+
+function isValidAudioBytes(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  if (bytes.length < 3) return false;
+  if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true;
+  if (bytes[0] === 0xff && [0xfb, 0xf3, 0xf2].includes(bytes[1])) return true;
+  const head = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, Math.min(bytes.length, 512))).toLowerCase();
+  if (head.includes("<html") || head.includes("<!doctype") || isChallengeText(head)) return false;
+  return false;
 }
 
 async function tryRefreshSongLink(env, row) {
@@ -2054,7 +2147,9 @@ async function fetchText(target) {
     redirect: "follow",
   });
   if (!response.ok) return "";
-  return response.text();
+  const html = await response.text();
+  if (isChallengeText(html)) return "";
+  return html;
 }
 
 function extractAlbumTracks(html) {

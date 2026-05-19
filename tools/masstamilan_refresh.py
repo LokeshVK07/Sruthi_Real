@@ -47,9 +47,16 @@ LISTING_PATH = "/tamil-songs?page={page}"
 MOVIE_INDEX_PATH = "/movie-index"
 CHALLENGE_MARKERS = (
     "just a moment",
+    "cloudflare",
+    "captcha",
     "cf-browser-verification",
     "checking your browser",
     "enable javascript and cookies to continue",
+    "attention required",
+    "error code: 1020",
+    "403 forbidden",
+    "429 too many requests",
+    "503 service unavailable",
 )
 
 
