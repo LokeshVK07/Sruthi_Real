@@ -1139,9 +1139,8 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
   const tracks = extractAlbumTracks(html);
   if (!tracks.length) return [];
 
-  // Populate KV cache for the whole album. Keep this intentionally short:
-  // MassTamilan downloader tokens can be challenged/expired before their URL
-  // timestamp, and a stale KV token should never trap playback for 30 minutes.
+  // Populate KV cache for the whole album. This stores only tiny downloader
+  // token metadata, never audio bytes. Audio belongs in Cache API/R2.
   if (env?.TOKEN_CACHE) {
     const payload = tracks
       .map((t) => {
@@ -1149,7 +1148,7 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
         return { id: String(t.id || ""), title: trackTitle(t), sp: cleanText(t.songPageUrl), dl128: urls.find((item) => item.includes("/p128_cdn/")) || urls[0] || "", dl320: urls.find((item) => item.includes("/p320_cdn/")) || urls[1] || "", dl: urls[0] || "" };
       })
       .filter((t) => t.dl || t.dl128 || t.dl320);
-    env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 300 }).catch(() => {});
+    env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 1800 }).catch(() => {});
   }
 
   const track = findAlbumTrackForSong(tracks, row, albumUrl);
@@ -1206,14 +1205,6 @@ async function handleStream(songId, request, env, ctx) {
 
   if (!row) return json({ error: "Song not found." }, 404);
 
-  // Start fresh-URL lookup immediately. When TOKEN_CACHE has the album, this
-  // resolves in ~5 ms (KV read). Even on a miss it runs in parallel with the
-  // stored-URL attempt below, so no wall-clock time is wasted. A forced refresh
-  // skips only Worker cache/token cache; it must still try DB audio URLs first
-  // because old MassTamilan album pages can be Cloudflare-challenged while the
-  // existing downloader URL is still perfectly playable.
-  const freshUrlsPromise = fetchFreshAudioUrls(row, env, forceRefresh ? { bypassCache: true } : {});
-
   let response = await tryAudioCandidates(row, request);
   if (response) {
     markSongPlayable(env, ctx, songId);
@@ -1226,8 +1217,9 @@ async function handleStream(songId, request, env, ctx) {
     return response;
   }
 
-  // Stored URLs failed. Await fresh URLs (usually already resolved from KV).
-  const freshUrls = await freshUrlsPromise;
+  // Stored URLs failed. Only now touch KV/live album tokens, so normal
+  // successful playback does not spend KV reads.
+  const freshUrls = await fetchFreshAudioUrls(row, env, forceRefresh ? { bypassCache: true } : {});
   for (const freshUrl of freshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
     if (response) {
@@ -1304,18 +1296,13 @@ function audioObjectKey(songId) {
   return `audio/${encodeURIComponent(String(songId))}.mp3`;
 }
 
-function audioMetaKey(songId) {
-  return `audio-meta/${encodeURIComponent(String(songId))}.json`;
-}
-
 async function hasDurableAudio(env, songId) {
   if (!songId) return false;
   if (env?.AUDIO_BUCKET) {
     const object = await env.AUDIO_BUCKET.head(audioObjectKey(songId)).catch(() => null);
     if (object) return true;
   }
-  if (!env?.TOKEN_CACHE) return false;
-  return Boolean(await env.TOKEN_CACHE.get(audioMetaKey(songId)).catch(() => null));
+  return false;
 }
 
 async function audioResponseFromR2(env, songId, rangeHeader) {
@@ -1347,52 +1334,12 @@ async function storeAudioInR2(env, songId, response) {
   return true;
 }
 
-async function audioResponseFromKv(env, songId, rangeHeader) {
-  if (!env?.TOKEN_CACHE || !songId) return null;
-  const body = await env.TOKEN_CACHE.get(audioObjectKey(songId), "arrayBuffer").catch(() => null);
-  if (!body?.byteLength || !isValidAudioBytes(body)) return null;
-  const metaText = await env.TOKEN_CACHE.get(audioMetaKey(songId)).catch(() => "");
-  let contentType = "audio/mpeg";
-  try {
-    contentType = JSON.parse(metaText || "{}").contentType || contentType;
-  } catch {}
-  if (rangeHeader) return rangeResponseFromAudioBuffer(body, rangeHeader, contentType);
-
-  const headers = new Headers(corsHeaders());
-  headers.set("Content-Type", contentType);
-  headers.set("Content-Length", String(body.byteLength));
-  headers.set("Accept-Ranges", "bytes");
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
-  return new Response(body, { status: 200, headers });
-}
-
-async function storeAudioInKv(env, songId, response) {
-  if (!env?.TOKEN_CACHE || !songId || !response?.ok) return false;
-  const contentType = cleanText(response.headers.get("content-type")).toLowerCase();
-  if (!isAudioContentType(contentType) || response.headers.get("content-range")) return false;
-  const body = await response.arrayBuffer().catch(() => null);
-  if (!body?.byteLength || !isValidAudioBytes(body)) return false;
-  await env.TOKEN_CACHE.put(audioObjectKey(songId), body);
-  await env.TOKEN_CACHE.put(
-    audioMetaKey(songId),
-    JSON.stringify({
-      songId: String(songId),
-      contentType: response.headers.get("content-type") || "audio/mpeg",
-      byteLength: body.byteLength,
-      cachedAt: nowIso(),
-    }),
-  );
-  return true;
-}
-
 async function audioResponseFromDurableCache(env, songId, rangeHeader) {
-  return (await audioResponseFromR2(env, songId, rangeHeader)) || (await audioResponseFromKv(env, songId, rangeHeader));
+  return audioResponseFromR2(env, songId, rangeHeader);
 }
 
 async function storeAudioInDurableCache(env, songId, response) {
-  const r2Stored = await storeAudioInR2(env, songId, response.clone()).catch(() => false);
-  if (r2Stored) return true;
-  return storeAudioInKv(env, songId, response).catch(() => false);
+  return storeAudioInR2(env, songId, response).catch(() => false);
 }
 
 async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
