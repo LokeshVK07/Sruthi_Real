@@ -24,7 +24,7 @@ type MobileSearchProps = {
   onClose: () => void;
   onSelectFilter: (filter: FilterKey) => void;
   onClearHistory: () => void;
-  onPlaySong: (song: Song) => void;
+  onPlaySong: (song: Song, sourceQueue?: Song[]) => void;
   onOpenAlbum: (albumId: string) => void;
   onOpenArtist: (artist: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
@@ -161,7 +161,7 @@ export default function MobileSearch({
         <section className="mobile-section">
           <h2>Tracks</h2>
           {songs.slice(0, 30).map((song) => (
-            <button key={song.id} type="button" className="mobile-result-row" onClick={() => onPlaySong(song)}>
+            <button key={song.id} type="button" className="mobile-result-row" onClick={() => onPlaySong(song, songs)}>
               <AbstractCover src={imageForSong(song)} alt={song.title} seed={song.id || song.title} size="sm" className="mobile-artwork" />
               <div>
                 <strong>{song.title}</strong>

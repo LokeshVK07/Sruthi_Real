@@ -52,8 +52,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           ]
         : [song];
     const index = nextQueue.findIndex((item) => item.id === song.id);
+    const resolvedQueue = index >= 0 ? nextQueue : [song, ...nextQueue.filter((item) => item.id !== song.id)];
     set({
-      queue: nextQueue,
+      queue: resolvedQueue,
       currentIndex: index >= 0 ? index : 0,
       playing: true
     });

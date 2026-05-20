@@ -317,6 +317,21 @@ export default function App() {
       year: latest?.year ?? song.year ?? album?.year ?? null,
     };
   };
+  const ensureSongInQueue = (song: Song, songs: Song[] = []) => {
+    const selected = withLatestSongMetadata(song) ?? song;
+    const seen = new Set<string>();
+    const queueItems: Song[] = [];
+    for (const item of songs) {
+      const enriched = withLatestSongMetadata(item) ?? item;
+      if (!enriched?.id || seen.has(enriched.id)) continue;
+      seen.add(enriched.id);
+      queueItems.push(enriched);
+    }
+    if (!seen.has(selected.id)) {
+      queueItems.unshift(selected);
+    }
+    return { selected, queueItems: queueItems.length ? queueItems : [selected] };
+  };
   const enrichedQueue = useMemo(
     () => queue.map((song) => withLatestSongMetadata(song) ?? song),
     [queue, songLookup, albumLookup],
@@ -324,17 +339,21 @@ export default function App() {
   const searchSongResults = useMemo(() => {
     if (!debouncedQuery) return [];
     const backendItems = searchData?.tracks ?? [];
-    if (backendItems.length) return backendItems;
+    if (backendItems.length) {
+      return backendItems
+        .map((song) => withLatestSongMetadata(song) ?? song)
+        .filter((song, index, items) => items.findIndex((item) => item.id === song.id) === index);
+    }
     // Fallback to local filter — capped at 50 so we never render the whole
     // library on slow devices.
     const lower = debouncedQuery.toLowerCase();
     const out: Song[] = [];
     for (const song of fullLibrary) {
-      if (titleMatches(song, lower)) out.push(song);
+      if (titleMatches(song, lower)) out.push(withLatestSongMetadata(song) ?? song);
       if (out.length >= 50) break;
     }
     return out;
-  }, [debouncedQuery, fullLibrary, searchData?.tracks]);
+  }, [debouncedQuery, fullLibrary, searchData?.tracks, songLookup, albumLookup]);
   const searchAlbumResults = useMemo(() => searchData?.albums ?? [], [searchData?.albums]);
   const searchArtistResults = useMemo(() => searchData?.artists ?? [], [searchData?.artists]);
   const searchComposerResults = useMemo(() => searchData?.composers ?? [], [searchData?.composers]);
@@ -1093,10 +1112,11 @@ export default function App() {
   );
 
   function handleSongSelect(song: Song, sourceQueue?: Song[]) {
-    const scopedQueue = sourceQueue?.length ? sourceQueue : queueFromAlbum(song.albumId, fullLibrary);
-    playTrack(song, { autoPlay: true, addToRecent: true, sourceQueue: scopedQueue.length ? scopedQueue : [song] });
-    if (song.albumId) {
-      const albumId = song.albumId;
+    const baseQueue = sourceQueue?.length ? sourceQueue : queueFromAlbum(song.albumId, fullLibrary);
+    const { selected, queueItems } = ensureSongInQueue(song, baseQueue);
+    playTrack(selected, { autoPlay: true, addToRecent: true, sourceQueue: queueItems });
+    if (selected.albumId) {
+      const albumId = selected.albumId;
       const prefetch = () => requestAlbumPrefetch(albumId, 4, false);
       if (typeof requestIdleCallback === "function") {
         requestIdleCallback(prefetch, { timeout: 800 });

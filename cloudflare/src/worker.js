@@ -1058,12 +1058,52 @@ function trackAudioUrls(track, albumUrl) {
   return urls;
 }
 
+function trackTitle(track) {
+  return cleanText(track?.name || track?.title || track?.songName || track?.trackName);
+}
+
+function normalizeTrackTitle(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*(?:from|feat|version|theme|song|single|movie)[^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isSameTrackTitle(left, right) {
+  const a = normalizeTrackTitle(left);
+  const b = normalizeTrackTitle(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.length >= 8 && b.length >= 8 && (a.includes(b) || b.includes(a));
+}
+
+function findAlbumTrackForSong(tracks, row, albumUrl) {
+  const songId = String(cleanText(String(row.id)));
+  const songPageUrl = cleanText(row.song_page_url);
+  const absoluteSongPageUrl = absoluteUrl(songPageUrl, albumUrl) || songPageUrl;
+  const byId = tracks.find((track) => String(track.id || "") === songId);
+  if (byId) return byId;
+  if (songPageUrl) {
+    const byPage = tracks.find((track) => {
+      const trackPage = cleanText(track.songPageUrl);
+      const absoluteTrackPage = absoluteUrl(trackPage, albumUrl) || trackPage;
+      return trackPage === songPageUrl || absoluteTrackPage === absoluteSongPageUrl;
+    });
+    if (byPage) return byPage;
+  }
+  return tracks.find((track) => isSameTrackTitle(trackTitle(track), row.title)) || null;
+}
+
 async function fetchFreshAudioUrls(row, env, options = {}) {
   const albumUrl = cleanText(row.album_url);
   if (!albumUrl) return [];
 
   const songId = String(cleanText(String(row.id)));
   const songPageUrl = cleanText(row.song_page_url);
+  const rowTitle = cleanText(row.title);
   const kvKey = `tracks:${albumUrl}`;
   const bypassCache = Boolean(options?.bypassCache);
 
@@ -1079,7 +1119,13 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
       if (Array.isArray(cached)) {
         const entry =
           cached.find((t) => String(t.id) === songId) ||
-          (songPageUrl && cached.find((t) => t.sp === songPageUrl)) ||
+          (songPageUrl && cached.find((t) => {
+            const trackPage = cleanText(t.sp);
+            const absoluteTrackPage = absoluteUrl(trackPage, albumUrl) || trackPage;
+            const absoluteSongPageUrl = absoluteUrl(songPageUrl, albumUrl) || songPageUrl;
+            return trackPage === songPageUrl || absoluteTrackPage === absoluteSongPageUrl;
+          })) ||
+          cached.find((t) => isSameTrackTitle(t.title, rowTitle)) ||
           null;
         const urls = unique([entry?.dl128, entry?.dl320, entry?.dl].map(cleanText).filter(Boolean));
         if (urls.length) return urls;
@@ -1100,16 +1146,13 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
     const payload = tracks
       .map((t) => {
         const urls = trackAudioUrls(t, albumUrl);
-        return { id: String(t.id || ""), sp: cleanText(t.songPageUrl), dl128: urls.find((item) => item.includes("/p128_cdn/")) || urls[0] || "", dl320: urls.find((item) => item.includes("/p320_cdn/")) || urls[1] || "", dl: urls[0] || "" };
+        return { id: String(t.id || ""), title: trackTitle(t), sp: cleanText(t.songPageUrl), dl128: urls.find((item) => item.includes("/p128_cdn/")) || urls[0] || "", dl320: urls.find((item) => item.includes("/p320_cdn/")) || urls[1] || "", dl: urls[0] || "" };
       })
       .filter((t) => t.dl || t.dl128 || t.dl320);
     env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 300 }).catch(() => {});
   }
 
-  const track =
-    tracks.find((t) => String(t.id || "") === songId) ||
-    (songPageUrl && tracks.find((t) => cleanText(t.songPageUrl) === songPageUrl)) ||
-    null;
+  const track = findAlbumTrackForSong(tracks, row, albumUrl);
   return trackAudioUrls(track, albumUrl);
 }
 
@@ -1561,7 +1604,7 @@ async function tryRefreshSongLink(env, row) {
 
     const refreshed = await refreshAlbum(env, albumUrl, albumHtml);
     if (!refreshed) continue;
-    return env.DB.prepare(
+    const refreshedById = await env.DB.prepare(
       `
       SELECT id, album_url, title, artist, composer, movie, year, mood,
              song_page_url, source_url, image_url, audio_128_url, audio_320_url,
@@ -1570,6 +1613,20 @@ async function tryRefreshSongLink(env, row) {
       WHERE id = ?
       `,
     ).bind(row.id).first();
+    if (refreshedById) return refreshedById;
+
+    const refreshedAlbumRows = await env.DB.prepare(
+      `
+      SELECT id, album_url, title, artist, composer, movie, year, mood,
+             song_page_url, source_url, image_url, audio_128_url, audio_320_url,
+             remote_audio_128_url, remote_audio_320_url, last_refreshed_at, link_status
+      FROM songs
+      WHERE album_url = ?
+      LIMIT 80
+      `,
+    ).bind(albumUrl).all();
+    const matched = (refreshedAlbumRows?.results || []).find((candidate) => isSameTrackTitle(candidate.title, row.title));
+    if (matched) return matched;
   }
   return null;
 }
