@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
@@ -69,6 +70,13 @@ def main():
 
   if args.account_id:
     config["account_id"] = args.account_id
+
+  relay_origin = os.environ.get("SRUTHI_PYTHON_STREAM_ORIGIN", "").strip().rstrip("/")
+  vars_config = config.setdefault("vars", {})
+  if relay_origin:
+    vars_config["PYTHON_STREAM_ORIGIN"] = relay_origin
+  else:
+    vars_config.pop("PYTHON_STREAM_ORIGIN", None)
 
   output_path.parent.mkdir(parents=True, exist_ok=True)
   output_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")

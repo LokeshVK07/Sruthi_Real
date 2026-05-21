@@ -5,6 +5,8 @@ const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
 const STREAM_RANGE_TIMEOUT_MS = 6000;
 const STREAM_FULL_TIMEOUT_MS = 25000;
+const STREAM_RELAY_RANGE_TIMEOUT_MS = 30000;
+const STREAM_RELAY_FULL_TIMEOUT_MS = 90000;
 const GB_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_R2_CACHE_TARGET_BYTES = 7 * GB_BYTES;
 const DEFAULT_R2_CACHE_HARD_MAX_BYTES = 8 * GB_BYTES;
@@ -1297,6 +1299,22 @@ async function handleStream(songId, request, env, ctx) {
     }
   }
 
+  // Workers cannot use browser-grade TLS/client impersonation. If MassTamilan
+  // returns a Cloudflare challenge to the Worker, hand the exact same song row
+  // to an optional Python relay that can use curl_cffi/cloudscraper-style
+  // fetching. R2/edge cache stay first; the relay is only the final repair path.
+  response = await fetchPythonStreamRelay(row, request, env);
+  if (response) {
+    markSongPlayable(env, ctx, songId);
+    if (!range) {
+      ctx?.waitUntil(caches.default.put(cacheKey, response.clone()).catch(() => {}));
+      ctx?.waitUntil(storeAudioInDurableCache(env, songId, response.clone()).catch(() => {}));
+    } else {
+      ctx?.waitUntil(warmSongFromPythonRelay(env, origin, row, cacheKey, songId));
+    }
+    return response;
+  }
+
   ctx?.waitUntil(
     env.DB.prepare("UPDATE songs SET link_status = 'unavailable' WHERE id = ?")
       .bind(songId)
@@ -1304,6 +1322,90 @@ async function handleStream(songId, request, env, ctx) {
       .catch(() => {}),
   );
   return json({ error: "Upstream stream unavailable." }, 502);
+}
+
+function pythonStreamRelayOrigin(env) {
+  return cleanText(env?.PYTHON_STREAM_ORIGIN || env?.STREAM_RELAY_ORIGIN).replace(/\/+$/, "");
+}
+
+function pythonStreamRelayToken(env) {
+  return cleanText(env?.PYTHON_STREAM_RELAY_TOKEN || env?.STREAM_RELAY_TOKEN);
+}
+
+function relaySongPayload(row) {
+  return {
+    id: cleanText(row?.id),
+    album_url: cleanText(row?.album_url),
+    title: cleanText(row?.title),
+    artist: cleanText(row?.artist),
+    composer: cleanText(row?.composer),
+    movie: cleanText(row?.movie),
+    year: row?.year || 0,
+    mood: cleanText(row?.mood),
+    song_page_url: cleanText(row?.song_page_url),
+    source_url: cleanText(row?.source_url),
+    image_url: cleanText(row?.image_url),
+    audio_128_url: cleanText(row?.audio_128_url || row?.remote_audio_128_url),
+    audio_320_url: cleanText(row?.audio_320_url || row?.remote_audio_320_url),
+    remote_audio_128_url: cleanText(row?.remote_audio_128_url),
+    remote_audio_320_url: cleanText(row?.remote_audio_320_url),
+  };
+}
+
+async function fetchPythonStreamRelay(row, request, env, options = {}) {
+  const origin = pythonStreamRelayOrigin(env);
+  if (!origin || !row?.id) return null;
+
+  const range = options.full ? "" : cleanText(request.headers.get("Range"));
+  const headers = new Headers({
+    Accept: "audio/mpeg,audio/*;q=0.9,*/*;q=0.8",
+    "Content-Type": "application/json",
+  });
+  if (range) headers.set("Range", range);
+  const token = pythonStreamRelayToken(env);
+  if (token) headers.set("X-Sruthi-Relay-Token", token);
+
+  const timeoutMs = range ? STREAM_RELAY_RANGE_TIMEOUT_MS : STREAM_RELAY_FULL_TIMEOUT_MS;
+  const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
+
+  let response;
+  try {
+    response = await fetch(`${origin}/api/relay/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ song: relaySongPayload(row) }),
+      redirect: "follow",
+      signal,
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response?.ok && response?.status !== 206) return null;
+  const contentType = cleanText(response.headers.get("content-type")).toLowerCase();
+  if (contentType.includes("text/html") || contentType.includes("text/plain") || !isAudioContentType(contentType)) {
+    return null;
+  }
+
+  const outHeaders = new Headers(corsHeaders());
+  outHeaders.set("Content-Type", response.headers.get("content-type") || "audio/mpeg");
+  if (response.headers.get("content-length")) outHeaders.set("Content-Length", response.headers.get("content-length"));
+  if (response.headers.get("content-range")) outHeaders.set("Content-Range", response.headers.get("content-range"));
+  outHeaders.set("Accept-Ranges", response.headers.get("accept-ranges") || "bytes");
+  outHeaders.set("Cache-Control", range ? "public, max-age=3600" : "public, max-age=31536000, immutable");
+  outHeaders.set("X-Sruthi-Source", "python-relay");
+
+  return new Response(response.body, { status: response.status, headers: outHeaders });
+}
+
+async function warmSongFromPythonRelay(env, origin, row, cacheKey, cacheSongId) {
+  const response = await fetchPythonStreamRelay(row, new Request(`${origin}/api/stream/${cacheSongId || row.id}`), env, { full: true });
+  if (!response) return false;
+  const forR2 = response.clone();
+  await caches.default.put(cacheKey, response.clone()).catch(() => {});
+  return storeAudioInDurableCache(env, cacheSongId || row.id, forR2).catch(() => false);
 }
 
 function markSongPlayable(env, ctx, songId) {
