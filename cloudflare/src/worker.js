@@ -1123,55 +1123,12 @@ async function fetchFreshAudioUrls(row, env, options = {}) {
   const albumUrl = cleanText(row.album_url);
   if (!albumUrl) return [];
 
-  const songId = String(cleanText(String(row.id)));
-  const songPageUrl = cleanText(row.song_page_url);
-  const rowTitle = cleanText(row.title);
-  const kvKey = `tracks:${albumUrl}`;
-  const bypassCache = Boolean(options?.bypassCache);
-
-  // KV cache hit → return immediately without any upstream fetch.
-  if (env?.TOKEN_CACHE && bypassCache) {
-    try {
-      await env.TOKEN_CACHE.delete(kvKey);
-    } catch {}
-  }
-  if (env?.TOKEN_CACHE && !bypassCache) {
-    try {
-      const cached = await env.TOKEN_CACHE.get(kvKey, "json");
-      if (Array.isArray(cached)) {
-        const entry =
-          cached.find((t) => String(t.id) === songId) ||
-          (songPageUrl && cached.find((t) => {
-            const trackPage = cleanText(t.sp);
-            const absoluteTrackPage = absoluteUrl(trackPage, albumUrl) || trackPage;
-            const absoluteSongPageUrl = absoluteUrl(songPageUrl, albumUrl) || songPageUrl;
-            return trackPage === songPageUrl || absoluteTrackPage === absoluteSongPageUrl;
-          })) ||
-          cached.find((t) => isSameTrackTitle(t.title, rowTitle)) ||
-          null;
-        const urls = unique([entry?.dl128, entry?.dl320, entry?.dl].map(cleanText).filter(Boolean));
-        if (urls.length) return urls;
-      }
-    } catch {}
-  }
-
-  // KV miss — fetch the album page for fresh signed URLs.
+  // R2 is the only durable cache. Fresh downloader tokens are read from the
+  // album page only after stored DB URLs fail.
   const html = await fetchText(albumUrl);
   if (!html || !html.includes("window.albumTracks")) return [];
   const tracks = extractAlbumTracks(html);
   if (!tracks.length) return [];
-
-  // Populate KV cache for the whole album. This stores only tiny downloader
-  // token metadata, never audio bytes. Audio belongs in Cache API/R2.
-  if (env?.TOKEN_CACHE) {
-    const payload = tracks
-      .map((t) => {
-        const urls = trackAudioUrls(t, albumUrl);
-        return { id: String(t.id || ""), title: trackTitle(t), sp: cleanText(t.songPageUrl), dl128: urls.find((item) => item.includes("/p128_cdn/")) || urls[0] || "", dl320: urls.find((item) => item.includes("/p320_cdn/")) || urls[1] || "", dl: urls[0] || "" };
-      })
-      .filter((t) => t.dl || t.dl128 || t.dl320);
-    env.TOKEN_CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: 1800 }).catch(() => {});
-  }
 
   const track = findAlbumTrackForSong(tracks, row, albumUrl);
   return trackAudioUrls(track, albumUrl);
@@ -1242,8 +1199,8 @@ async function handleStream(songId, request, env, ctx) {
     return response;
   }
 
-  // Stored URLs failed. Only now touch KV/live album tokens, so normal
-  // successful playback does not spend KV reads.
+  // Stored URLs failed. Only now touch the live album page for fresh tokens, so
+  // normal successful playback does not spend upstream requests.
   const freshUrls = await fetchFreshAudioUrls(row, env, forceRefresh ? { bypassCache: true } : {});
   for (const freshUrl of freshUrls) {
     response = await fetchAudio(freshUrl, cleanText(row.album_url), range);
@@ -1256,14 +1213,14 @@ async function handleStream(songId, request, env, ctx) {
         ctx?.waitUntil(warmSongInCache(env, origin, row));
       }
       // Refresh the DB token rows in the background so future stored-URL
-      // checks will succeed until the KV entry also covers the album.
+      // checks will succeed from D1.
       ctx?.waitUntil(tryRefreshSongLink(env, row));
       return response;
     }
   }
 
-  // If the KV token was stale/challenged, delete that cached token and force a
-  // fresh album lookup before the heavier DB refresh path. `refresh=1` starts
+  // If the first live token lookup was stale/challenged, force one fresh album
+  // lookup before the heavier DB refresh path. `refresh=1` starts
   // here immediately so frontend repair retries do not waste time on known-bad
   // cached/stored URLs.
   const bypassedFreshUrls = forceRefresh ? [] : await fetchFreshAudioUrls(row, env, { bypassCache: true });
