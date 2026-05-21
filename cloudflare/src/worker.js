@@ -5,6 +5,11 @@ const TELUGU_LIBRARY_LIMIT = 2000;
 const HOMEPAGE_RECENT_WINDOW_DAYS = 30;
 const STREAM_RANGE_TIMEOUT_MS = 6000;
 const STREAM_FULL_TIMEOUT_MS = 25000;
+const GB_BYTES = 1024 * 1024 * 1024;
+const DEFAULT_R2_CACHE_TARGET_BYTES = 7 * GB_BYTES;
+const DEFAULT_R2_CACHE_HARD_MAX_BYTES = 8 * GB_BYTES;
+const DEFAULT_R2_CACHE_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const R2_AUDIO_PREFIX = "audio/";
 const CHALLENGE_MARKERS = [
   "just a moment",
   "cloudflare",
@@ -474,7 +479,7 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(runScheduledSync(env));
+    ctx.waitUntil(cleanupR2AudioCache(env));
   },
 };
 
@@ -832,6 +837,21 @@ async function handleApi(request, env, url, ctx) {
       await upsertOfficialPlaylist(env, playlist);
     }
     return json({ ok: true, imported: playlists.length });
+  }
+
+  if (url.pathname === "/api/admin/r2-cleanup" && request.method === "POST") {
+    const configuredToken = cleanText(env.SYNC_ADMIN_TOKEN);
+    const suppliedToken = cleanText(request.headers.get("x-sync-token")) || cleanText(url.searchParams.get("token"));
+    if (!configuredToken) {
+      return json({ error: "SYNC_ADMIN_TOKEN is required for manual R2 cleanup." }, 403);
+    }
+    if (suppliedToken !== configuredToken) {
+      return json({ error: "Unauthorized." }, 401);
+    }
+    const dryRun = cleanText(url.searchParams.get("dryRun")).toLowerCase() === "true";
+    const targetBytes = toInt(url.searchParams.get("targetBytes"), 0) || r2CacheTargetBytes(env);
+    const result = await cleanupR2AudioCache(env, { dryRun, targetBytes });
+    return json(result, result.ok ? 200 : 500);
   }
 
   if (url.pathname === "/api/warmup") {
@@ -1325,11 +1345,15 @@ async function storeAudioInR2(env, songId, response) {
   if (!env?.AUDIO_BUCKET || !songId || !response?.ok) return false;
   const contentType = cleanText(response.headers.get("content-type")).toLowerCase();
   if (!isAudioContentType(contentType) || response.headers.get("content-range")) return false;
+  const contentLength = toInt(response.headers.get("content-length"), 0);
+  const maxAudioBytes = r2MaxAudioBytes(env);
+  if (contentLength > maxAudioBytes) return false;
   const body = await response.arrayBuffer().catch(() => null);
   if (!body?.byteLength || !isValidAudioBytes(body)) return false;
+  if (body.byteLength > maxAudioBytes) return false;
   await env.AUDIO_BUCKET.put(audioObjectKey(songId), body, {
     httpMetadata: { contentType: response.headers.get("content-type") || "audio/mpeg" },
-    customMetadata: { songId: String(songId), cachedAt: nowIso() },
+    customMetadata: { songId: String(songId), cachedAt: nowIso(), byteLength: String(body.byteLength) },
   });
   return true;
 }
@@ -1340,6 +1364,72 @@ async function audioResponseFromDurableCache(env, songId, rangeHeader) {
 
 async function storeAudioInDurableCache(env, songId, response) {
   return storeAudioInR2(env, songId, response).catch(() => false);
+}
+
+function r2CacheTargetBytes(env) {
+  const configured = toInt(env?.R2_CACHE_TARGET_BYTES, DEFAULT_R2_CACHE_TARGET_BYTES);
+  return Math.min(Math.max(configured, GB_BYTES), DEFAULT_R2_CACHE_HARD_MAX_BYTES);
+}
+
+function r2MaxAudioBytes(env) {
+  const configured = toInt(env?.R2_CACHE_MAX_AUDIO_BYTES, DEFAULT_R2_CACHE_MAX_AUDIO_BYTES);
+  return Math.min(Math.max(configured, 1024 * 1024), DEFAULT_R2_CACHE_MAX_AUDIO_BYTES);
+}
+
+async function cleanupR2AudioCache(env, options = {}) {
+  if (!env?.AUDIO_BUCKET) {
+    return { ok: false, error: "AUDIO_BUCKET is not configured." };
+  }
+  const targetBytes = Math.min(toInt(options.targetBytes, r2CacheTargetBytes(env)), DEFAULT_R2_CACHE_HARD_MAX_BYTES);
+  const dryRun = Boolean(options.dryRun);
+  const objects = [];
+  let cursor;
+  let totalBytes = 0;
+  do {
+    const listed = await env.AUDIO_BUCKET.list({
+      prefix: R2_AUDIO_PREFIX,
+      cursor,
+      limit: 1000,
+    });
+    for (const object of listed.objects || []) {
+      const size = Number(object.size || 0);
+      totalBytes += size;
+      objects.push({
+        key: object.key,
+        size,
+        uploaded: object.uploaded ? new Date(object.uploaded).getTime() : 0,
+      });
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+
+  objects.sort((left, right) => (left.uploaded || 0) - (right.uploaded || 0));
+  const deleteKeys = [];
+  let projectedBytes = totalBytes;
+  for (const object of objects) {
+    if (projectedBytes <= targetBytes) break;
+    deleteKeys.push(object.key);
+    projectedBytes -= object.size;
+  }
+
+  if (!dryRun && deleteKeys.length) {
+    for (let index = 0; index < deleteKeys.length; index += 100) {
+      const chunk = deleteKeys.slice(index, index + 100);
+      await env.AUDIO_BUCKET.delete(chunk);
+    }
+  }
+
+  return {
+    ok: true,
+    dryRun,
+    targetBytes,
+    totalBytes,
+    projectedBytes,
+    scannedObjects: objects.length,
+    deletedObjects: dryRun ? 0 : deleteKeys.length,
+    wouldDeleteObjects: deleteKeys.length,
+    deletedBytes: Math.max(0, totalBytes - projectedBytes),
+  };
 }
 
 async function rangeResponseFromCachedAudio(cachedResponse, rangeHeader) {
