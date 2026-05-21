@@ -57,7 +57,7 @@ jobs:
       - name: Install workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install duckdb requests beautifulsoup4 cloudscraper
+          python -m pip install duckdb requests beautifulsoup4 cloudscraper curl_cffi
           npm install --global wrangler@4.81.1
 
       - name: Validate workflow configuration
@@ -108,6 +108,7 @@ jobs:
             "cloudflare/scripts/export_d1_sql.py"
             "cloudflare/data/release-baseline.json"
             "tools/masstamilan_refresh.py"
+            "tools/r2_audio_cache_warm.py"
             "server.py"
           )
 
@@ -379,6 +380,24 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler deploy --config "${GENERATED_WRANGLER_CONFIG}"
+
+      - name: Warm R2 audio cache for fastest playback
+        run: |
+          set -euo pipefail
+          python tools/r2_audio_cache_warm.py \
+            --db data/sruthi.db \
+            --bucket sruthi-audio-cache \
+            --wrangler-config "${GENERATED_WRANGLER_CONFIG}" \
+            --order recent \
+            --scan-limit 1000 \
+            --limit 36 \
+            --max-total-bytes 536870912 \
+            --max-song-bytes 26214400 \
+            --prefer-bitrate 128 \
+            --workers 2 \
+            --retries 2 \
+            --request-delay 0.75 \
+            --challenge-cooldown 35
 
       - name: Mark deployed D1 slot as active
         env:
