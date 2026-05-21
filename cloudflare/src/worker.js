@@ -1202,7 +1202,10 @@ async function handleStream(songId, request, env, ctx) {
     }
   }
 
-  const durableResponse = forceRefresh ? null : await audioResponseFromDurableCache(env, songId, range);
+  // Keep durable audio cache first even during a repair retry. `refresh=1`
+  // should bypass only the short edge cache; if R2 already has a validated MP3,
+  // serving it is faster and safer than touching the upstream again.
+  const durableResponse = await audioResponseFromDurableCache(env, songId, range);
   if (durableResponse) {
     markSongPlayable(env, ctx, songId);
     if (!range) ctx?.waitUntil(caches.default.put(cacheKey, durableResponse.clone()).catch(() => {}));
@@ -1527,6 +1530,7 @@ async function fetchAudio(target, albumUrl, rangeHeader) {
   if ((!response || !response.ok || contentType.includes("text/html") || contentType.includes("text/plain")) && rangeHeader) {
     try {
       response = await fetchCandidate(baseHeaders, STREAM_FULL_TIMEOUT_MS);
+      usedFullFallbackForRange = true;
     } catch {
       return null;
     }

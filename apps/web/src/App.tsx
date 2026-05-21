@@ -65,9 +65,13 @@ const navItems = [
   { key: "artists", label: "Artists", icon: Users }
 ] as const;
 
-function songStreamUrl(song: Song) {
+function songStreamUrl(song: Song, extraParams: Record<string, string | number | boolean> = {}) {
   const version = encodeURIComponent(String(song.updatedAt ?? song.id));
-  return `${song.streamUrl}?v=${version}`;
+  const params = new URLSearchParams({ v: version });
+  for (const [key, value] of Object.entries(extraParams)) {
+    params.set(key, String(value));
+  }
+  return `${song.streamUrl}?${params.toString()}`;
 }
 
 function formatTextSearch(song: Song) {
@@ -206,6 +210,7 @@ export default function App() {
   const deckBRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const deckGainNodesRef = useRef<WeakMap<HTMLAudioElement, GainNode>>(new WeakMap());
+  const currentSongRef = useRef<Song | null>(null);
   // Tracks how many transparent retries we've done for a given song so a flaky
   // upstream URL gets a second/third chance before we surface an error to the
   // user. Cleared whenever a different song starts.
@@ -368,6 +373,9 @@ export default function App() {
     const queuedSong = enrichedQueue[currentIndex] ?? null;
     return queuedSong ?? recentSongs[0] ?? pickInitialSong(fullLibrary);
   }, [enrichedQueue, currentIndex, recentSongs, fullLibrary]);
+  useEffect(() => {
+    currentSongRef.current = currentSong;
+  }, [currentSong]);
   const artistItems = home?.artists ?? [];
   const filteredRecentSongs = useMemo(() => recentSongs.filter((song) => titleMatches(song, debouncedQuery)), [recentSongs, debouncedQuery]);
   const filteredFavoriteSongs = useMemo(() => favoriteSongs.filter((song) => titleMatches(song, debouncedQuery)), [favoriteSongs, debouncedQuery]);
@@ -561,8 +569,9 @@ export default function App() {
             : [track, ...queue]
           : [track];
 
-    activateSongDeck(track, autoPlay);
     playSong(track, scopedQueue);
+    currentSongRef.current = track;
+    activateSongDeck(track, autoPlay);
     if (addToRecent) {
       updateRecentlyPlayed(track);
     }
@@ -1902,6 +1911,8 @@ export default function App() {
           }}
           onEnded={(event) => {
             if (deckIndex !== activeDeckIndex) return;
+            const endedSongId = event.currentTarget.dataset.songId;
+            if (endedSongId && currentSongRef.current?.id !== endedSongId) return;
             if (repeatMode === "one") {
               event.currentTarget.currentTime = 0;
               void safePlay(event.currentTarget);
@@ -1917,15 +1928,14 @@ export default function App() {
             setBuffering(false);
             // Most "errors" we see are transient: the masstamilan URL has
             // expired, or a CF-blocked album's first attempt is racing the
-            // Playwright fallback. The backend always refreshes URLs and
-            // retries on its own — silently re-load with a fresh cache-bust
-            // up to 3 times. Each retry has progressively more backoff so
-            // the server has time to fall back to Playwright if needed.
+            // Worker repair fallback. Force `refresh=1` so the backend bypasses
+            // bad edge/token cache and repairs the same clicked song.
             const retries = playbackRetryRef.current.get(failedSongId ?? "") ?? 0;
-            if (failedSongId && retries < 3 && currentSong && currentSong.id === failedSongId) {
+            const failedSong = currentSongRef.current;
+            if (failedSongId && retries < 4 && failedSong && failedSong.id === failedSongId) {
               playbackRetryRef.current.set(failedSongId, retries + 1);
-              const bust = `${songStreamUrl(currentSong)}${songStreamUrl(currentSong).includes("?") ? "&" : "?"}retry=${Date.now()}`;
-              const backoffMs = retries === 0 ? 200 : retries === 1 ? 800 : 1600;
+              const bust = songStreamUrl(failedSong, { refresh: 1, retry: Date.now() });
+              const backoffMs = retries === 0 ? 150 : retries === 1 ? 500 : retries === 2 ? 1000 : 1800;
               debugPlayback("retry", failedSongId, retries + 1, `backoff=${backoffMs}ms`);
               setBuffering(true);
               window.setTimeout(() => {
@@ -1936,11 +1946,11 @@ export default function App() {
               }, backoffMs);
               return;
             }
-            // After 3 retries the track really is unrecoverable for now —
-            // skip to the next one rather than stranding the user.
+            // Do not jump to another song on failure. Keeping the clicked song
+            // selected is much less confusing and lets the user retry.
             setPlaying(false);
-            debugPlayback("auto-skip", failedSongId);
-            handleNextTrack();
+            setHeroFeedback("Playback repair failed. Tap play to retry.");
+            debugPlayback("repair-failed", failedSongId);
           }}
         />
       ))}
