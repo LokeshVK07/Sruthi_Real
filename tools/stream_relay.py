@@ -15,24 +15,38 @@ import json
 import os
 import random
 import re
+import sqlite3
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 try:
     from curl_cffi import requests as cffi_requests
 except Exception as exc:  # pragma: no cover
     raise SystemExit("Missing dependency curl_cffi. Install with: python -m pip install curl_cffi") from exc
 
+try:
+    import boto3
+except Exception:  # pragma: no cover - R2 is optional.
+    boto3 = None
+
+try:
+    import duckdb
+except Exception:  # pragma: no cover - DuckDB lookup is optional unless configured.
+    duckdb = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE_ORIGIN = "https://www.masstamilan.dev"
 CACHE_AUDIO_DIR = Path(os.environ.get("SRUTHI_RELAY_AUDIO_CACHE", ROOT / ".cache" / "relay-audio"))
+DUCKDB_PATH = Path(os.environ.get("SRUTHI_DUCKDB_PATH", ROOT / "data" / "sruthi.duckdb"))
+SQLITE_PATH = Path(os.environ.get("SRUTHI_SQLITE_PATH", ROOT / "data" / "sruthi.db"))
 LISTEN_HOST = os.environ.get("SRUTHI_RELAY_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.environ.get("PORT", os.environ.get("SRUTHI_RELAY_PORT", "8088")))
 RELAY_TOKEN = os.environ.get("SRUTHI_RELAY_TOKEN", "")
@@ -78,6 +92,11 @@ def audio_cache_path(song_id: str) -> Path:
     return CACHE_AUDIO_DIR / f"{safe_id}.mp3"
 
 
+def audio_object_key(song_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", clean_text(song_id))
+    return f"audio/{safe_id}.mp3"
+
+
 def is_valid_audio_bytes(data: bytes) -> bool:
     if not data:
         return False
@@ -96,6 +115,74 @@ def is_valid_audio_file(path: Path) -> bool:
         return is_valid_audio_bytes(path.read_bytes()[:512])
     except OSError:
         return False
+
+
+def r2_configured() -> bool:
+    return bool(
+        boto3
+        and os.environ.get("R2_BUCKET_NAME")
+        and os.environ.get("R2_ACCESS_KEY_ID")
+        and os.environ.get("R2_SECRET_ACCESS_KEY")
+        and (os.environ.get("R2_ENDPOINT_URL") or os.environ.get("R2_ACCOUNT_ID"))
+    )
+
+
+def r2_client_and_bucket():
+    if not r2_configured():
+        return None, ""
+    endpoint = clean_text(os.environ.get("R2_ENDPOINT_URL"))
+    if not endpoint:
+        endpoint = f"https://{clean_text(os.environ.get('R2_ACCOUNT_ID'))}.r2.cloudflarestorage.com"
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+    return client, clean_text(os.environ.get("R2_BUCKET_NAME"))
+
+
+def restore_from_r2(song_id: str, cache_path: Path) -> bool:
+    client, bucket = r2_client_and_bucket()
+    if not client or not bucket:
+        return False
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = cache_path.with_suffix(f".r2.{os.getpid()}.part")
+    try:
+        client.download_file(bucket, audio_object_key(song_id), str(temp_path))
+        if not is_valid_audio_file(temp_path):
+            temp_path.unlink(missing_ok=True)
+            return False
+        os.replace(temp_path, cache_path)
+        return True
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        return False
+
+
+def upload_to_r2(song_id: str, cache_path: Path) -> None:
+    client, bucket = r2_client_and_bucket()
+    if not client or not bucket or not is_valid_audio_file(cache_path):
+        return
+    try:
+        client.upload_file(
+            str(cache_path),
+            bucket,
+            audio_object_key(song_id),
+            ExtraArgs={
+                "ContentType": "audio/mpeg",
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
+        )
+    except Exception as exc:
+        print(f"R2 upload failed for song {song_id}: {exc}", file=sys.stderr, flush=True)
+
+
+def upload_to_r2_background(song_id: str, cache_path: Path) -> None:
+    if not r2_configured():
+        return
+    threading.Thread(target=upload_to_r2, args=(song_id, cache_path), daemon=True).start()
 
 
 def is_audio_response(response) -> bool:
@@ -138,6 +225,50 @@ def unique(values: Iterable[str]) -> list[str]:
 
 def candidate_urls(song: RelaySong) -> list[str]:
     return unique((song.audio_128_url, song.audio_320_url, song.remote_audio_128_url, song.remote_audio_320_url))
+
+
+def row_to_song(row: dict) -> RelaySong:
+    return RelaySong(
+        id=clean_text(row.get("id")),
+        title=clean_text(row.get("title")),
+        album_url=absolute_url(row.get("album_url")),
+        song_page_url=absolute_url(row.get("song_page_url")),
+        source_url=absolute_url(row.get("source_url")),
+        audio_128_url=absolute_url(row.get("audio_128_url") or row.get("audio_url"), row.get("album_url") or SITE_ORIGIN),
+        audio_320_url=absolute_url(row.get("audio_320_url") or row.get("audio_url"), row.get("album_url") or SITE_ORIGIN),
+        remote_audio_128_url=absolute_url(row.get("remote_audio_128_url"), row.get("album_url") or SITE_ORIGIN),
+        remote_audio_320_url=absolute_url(row.get("remote_audio_320_url"), row.get("album_url") or SITE_ORIGIN),
+    )
+
+
+def query_catalog_song(song_id: str) -> RelaySong | None:
+    sql = """
+        SELECT id, title, album_url, song_page_url, source_url, audio_url,
+               audio_128_url, audio_320_url, remote_audio_128_url, remote_audio_320_url
+        FROM songs
+        WHERE id = ?
+        LIMIT 1
+    """
+    if DUCKDB_PATH.exists() and duckdb is not None:
+        connection = duckdb.connect(str(DUCKDB_PATH), read_only=True)
+        try:
+            cursor = connection.execute(sql, [song_id])
+            row = cursor.fetchone()
+            if not row:
+                return None
+            columns = [description[0] for description in cursor.description]
+            return row_to_song(dict(zip(columns, row)))
+        finally:
+            connection.close()
+    if SQLITE_PATH.exists():
+        connection = sqlite3.connect(SQLITE_PATH)
+        connection.row_factory = sqlite3.Row
+        try:
+            row = connection.execute(sql, [song_id]).fetchone()
+            return row_to_song(dict(row)) if row else None
+        finally:
+            connection.close()
+    return None
 
 
 def parse_album_tracks(html: str) -> list[dict]:
@@ -257,8 +388,40 @@ class RelayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/healthz":
-            self.send_json({"ok": True})
+        parsed = urlparse(self.path)
+        if parsed.path == "/healthz":
+            self.send_json(
+                {
+                    "ok": True,
+                    "duckdb": DUCKDB_PATH.exists(),
+                    "sqlite": SQLITE_PATH.exists(),
+                    "r2": r2_configured(),
+                }
+            )
+            return
+        match = re.match(r"^/api/stream/([^/]+)$", parsed.path)
+        if match:
+            if RELAY_TOKEN and self.headers.get("X-Sruthi-Relay-Token") != RELAY_TOKEN:
+                self.send_json({"error": "Forbidden."}, HTTPStatus.FORBIDDEN)
+                return
+            song = query_catalog_song(match.group(1))
+            if not song:
+                self.send_json({"error": "Song not found in relay catalog."}, HTTPStatus.NOT_FOUND)
+                return
+            self.handle_song_stream(song)
+            return
+        match = re.match(r"^/api/song-status/([^/]+)$", parsed.path)
+        if match:
+            song_id = clean_text(match.group(1))
+            cached = audio_cache_path(song_id)
+            self.send_json(
+                {
+                    "id": song_id,
+                    "cached": is_valid_audio_file(cached),
+                    "r2Configured": r2_configured(),
+                    "source": "python-relay",
+                }
+            )
             return
         self.send_json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
 
@@ -280,8 +443,17 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "song.id is required."}, HTTPStatus.BAD_REQUEST)
             return
 
+        self.handle_song_stream(song)
+
+    def handle_song_stream(self, song: RelaySong) -> None:
+        if not song.id:
+            self.send_json({"error": "song.id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
         range_header = clean_text(self.headers.get("Range"))
         cached = audio_cache_path(song.id)
+        if not is_valid_audio_file(cached):
+            restore_from_r2(song.id, cached)
         if range_header and is_valid_audio_file(cached):
             self.stream_cached_file(cached, range_header)
             return
@@ -353,6 +525,7 @@ class RelayHandler(BaseHTTPRequestHandler):
                 cache_handle = None
                 if is_valid_audio_file(temp_path):
                     os.replace(temp_path, cache_path)
+                    upload_to_r2_background(song.id, cache_path)
                 else:
                     temp_path.unlink(missing_ok=True)
         finally:

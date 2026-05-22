@@ -26,6 +26,20 @@ Set these on the Python host:
 PORT=8088
 SRUTHI_RELAY_TOKEN=<strong-random-token>
 SRUTHI_RELAY_AUDIO_CACHE=.cache/relay-audio
+SRUTHI_DUCKDB_PATH=data/sruthi.duckdb
+SRUTHI_SQLITE_PATH=data/sruthi.db
+```
+
+If R2 credentials are also configured on the Python host, the relay follows
+the isaibox shared-cache flow directly:
+
+```bash
+R2_ACCOUNT_ID=<cloudflare-account-id>
+R2_BUCKET_NAME=sruthi-audio-cache
+R2_ACCESS_KEY_ID=<r2-access-key>
+R2_SECRET_ACCESS_KEY=<r2-secret-key>
+# Optional when you want to override the default endpoint:
+R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 ```
 
 Then set these on the Cloudflare Worker:
@@ -48,5 +62,16 @@ The Worker still uses this order:
 Edge cache -> R2 audio cache -> stored DB URL -> fresh album tokens -> Python relay
 ```
 
-The relay is only the final fallback. Successful full relay responses are saved
-back into R2 by the Worker, so future plays avoid MassTamilan again.
+The relay itself uses this order:
+
+```text
+DuckDB/SQLite song lookup
+-> local .cache/relay-audio/<song_id>.mp3
+-> R2 audio/<song_id>.mp3 restore
+-> upstream MassTamilan with curl_cffi Chrome impersonation
+-> save local MP3
+-> upload successful MP3 to R2 in the background
+```
+
+The Worker can still send song rows to `POST /api/relay/stream`, but the relay
+also supports direct `GET /api/stream/<song_id>` lookups from DuckDB/SQLite.

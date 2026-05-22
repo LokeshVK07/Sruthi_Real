@@ -15,6 +15,7 @@ cloudflare/data/seed.sql
 cloudflare/data/seed-telugu.sql
 cloudflare/data/*.duckdb
 data/*.db
+data/*.duckdb
 data/*.json
 data/*.db-shm
 data/*.db-wal

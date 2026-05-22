@@ -32,29 +32,45 @@ def load_rows(connection, sql):
   return [tuple(row) for row in connection.execute(sql)]
 
 
-def validate_sqlite_source(db_path: Path):
-  if not db_path.exists():
-    raise RuntimeError(f"SQLite database not found: {db_path}")
-  if db_path.stat().st_size < 4096:
-    raise RuntimeError(f"SQLite database is unexpectedly small: {db_path.stat().st_size} bytes")
+def is_duckdb_path(db_path: Path):
+  return db_path.suffix.lower() in {".duckdb", ".ddb"}
 
-  connection = sqlite3.connect(db_path)
+
+def fetch_rows(engine, connection, sql):
+  cursor = connection.execute(sql)
+  if engine == "duckdb":
+    return [tuple(row) for row in cursor.fetchall()]
+  return load_rows(connection, sql)
+
+
+def validate_catalog_source(db_path: Path):
+  if not db_path.exists():
+    raise RuntimeError(f"Catalog database not found: {db_path}")
+  if db_path.stat().st_size < 4096:
+    raise RuntimeError(f"Catalog database is unexpectedly small: {db_path.stat().st_size} bytes")
+
+  engine = "duckdb" if is_duckdb_path(db_path) else "sqlite"
+  connection = duckdb.connect(str(db_path), read_only=True) if engine == "duckdb" else sqlite3.connect(db_path)
   try:
-    quick_check = connection.execute("PRAGMA quick_check").fetchone()
-    if quick_check and quick_check[0] != "ok":
-      raise RuntimeError(f"SQLite integrity check failed: {quick_check[0]}")
-    album_rows = load_rows(
+    if engine == "sqlite":
+      quick_check = connection.execute("PRAGMA quick_check").fetchone()
+      if quick_check and quick_check[0] != "ok":
+        raise RuntimeError(f"SQLite integrity check failed: {quick_check[0]}")
+    album_rows = fetch_rows(
+      engine,
       connection,
       """
       SELECT url, title, year, track_count, updated_at
       FROM albums
       """,
     )
-    song_rows = load_rows(
+    song_rows = fetch_rows(
+      engine,
       connection,
       """
       SELECT id, album_url, title, movie, composer, artist, year,
-             COALESCE(audio_128_url, ''), COALESCE(audio_320_url, ''), updated_at
+             COALESCE(audio_url, ''), COALESCE(audio_128_url, ''), COALESCE(audio_320_url, ''),
+             COALESCE(remote_audio_128_url, ''), COALESCE(remote_audio_320_url, ''), updated_at
       FROM songs
       """,
     )
@@ -100,21 +116,24 @@ def compute_metrics(source, duckdb_path: Path):
         composer VARCHAR,
         artist VARCHAR,
         year INTEGER,
+        audio_url VARCHAR,
         audio_128_url VARCHAR,
         audio_320_url VARCHAR,
+        remote_audio_128_url VARCHAR,
+        remote_audio_320_url VARCHAR,
         updated_at VARCHAR
       )
       """
     )
     connection.executemany("INSERT INTO albums VALUES (?, ?, ?, ?, ?)", source["albums"])
-    connection.executemany("INSERT INTO songs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", source["songs"])
+    connection.executemany("INSERT INTO songs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", source["songs"])
 
     metrics = connection.execute(
       """
       SELECT
         (SELECT COUNT(*) FROM albums) AS album_count,
         (SELECT COUNT(*) FROM songs) AS song_count,
-        (SELECT COUNT(*) FROM songs WHERE COALESCE(audio_128_url, '') <> '' OR COALESCE(audio_320_url, '') <> '') AS playable_song_count,
+        (SELECT COUNT(*) FROM songs WHERE COALESCE(NULLIF(audio_128_url, ''), NULLIF(remote_audio_128_url, ''), NULLIF(audio_320_url, ''), NULLIF(remote_audio_320_url, ''), NULLIF(audio_url, ''), '') <> '') AS playable_song_count,
         (SELECT COUNT(*) FROM (SELECT id FROM songs GROUP BY id HAVING COUNT(*) > 1)) AS duplicate_song_ids,
         (SELECT COUNT(*) FROM songs WHERE TRIM(COALESCE(title, '')) = '') AS blank_song_titles,
         (SELECT COUNT(*) FROM songs WHERE TRIM(COALESCE(movie, '')) = '') AS blank_song_movies,
@@ -224,7 +243,7 @@ def main():
   args.baseline = args.baseline.resolve()
   args.manifest = args.manifest.resolve()
   args.duckdb_path = args.duckdb_path.resolve()
-  source = validate_sqlite_source(args.db)
+  source = validate_catalog_source(args.db)
   metrics = compute_metrics(source, args.duckdb_path)
   validate_metrics(metrics, args.baseline)
   generate_seed(args.db, args.seed)

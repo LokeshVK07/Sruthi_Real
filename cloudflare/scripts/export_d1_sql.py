@@ -4,6 +4,8 @@ import argparse
 import sqlite3
 from pathlib import Path
 
+import duckdb
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "sruthi.db"
@@ -70,7 +72,7 @@ CREATE INDEX idx_songs_link_status ON songs(link_status);
 
 
 def parse_args():
-  parser = argparse.ArgumentParser(description="Export the local Sruthi SQLite catalog to a Cloudflare D1 seed SQL file.")
+  parser = argparse.ArgumentParser(description="Export the local Sruthi catalog to a Cloudflare D1 seed SQL file.")
   parser.add_argument("--db", type=Path, default=DB_PATH)
   parser.add_argument("--out", type=Path, default=OUT_PATH)
   return parser.parse_args()
@@ -92,9 +94,29 @@ def write_insert(handle, table, columns, row):
 
 def assert_source_db(db_path: Path):
   if not db_path.exists():
-    raise RuntimeError(f"SQLite source database not found: {db_path}")
+    raise RuntimeError(f"Catalog source database not found: {db_path}")
   if db_path.stat().st_size < 4096:
-    raise RuntimeError(f"SQLite source database looks too small: {db_path} ({db_path.stat().st_size} bytes)")
+    raise RuntimeError(f"Catalog source database looks too small: {db_path} ({db_path.stat().st_size} bytes)")
+
+
+def is_duckdb_path(db_path: Path):
+  return db_path.suffix.lower() in {".duckdb", ".ddb"}
+
+
+def open_catalog(db_path: Path):
+  if is_duckdb_path(db_path):
+    return "duckdb", duckdb.connect(str(db_path), read_only=True)
+  connection = sqlite3.connect(db_path)
+  connection.row_factory = sqlite3.Row
+  return "sqlite", connection
+
+
+def fetch_rows(engine, connection, sql):
+  cursor = connection.execute(sql)
+  if engine == "duckdb":
+    columns = [description[0] for description in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+  return cursor.fetchall()
 
 
 def main():
@@ -105,16 +127,15 @@ def main():
   assert_source_db(db_path)
   out_path.parent.mkdir(parents=True, exist_ok=True)
 
-  connection = sqlite3.connect(db_path)
-  connection.row_factory = sqlite3.Row
+  engine, connection = open_catalog(db_path)
 
   with out_path.open("w", encoding="utf-8") as handle:
-    handle.write("-- Generated from local SQLite catalog for Cloudflare D1\n")
+    handle.write(f"-- Generated from local {engine} catalog for Cloudflare D1\n")
     handle.write(SCHEMA.strip())
     handle.write("\n\n")
 
     meta_columns = ["key", "value"]
-    for row in connection.execute("SELECT key, value FROM app_meta ORDER BY key"):
+    for row in fetch_rows(engine, connection, "SELECT key, value FROM app_meta ORDER BY key"):
       write_insert(handle, "app_meta", meta_columns, row)
 
     album_columns = [
@@ -130,7 +151,9 @@ def main():
       "track_count",
       "updated_at",
     ]
-    for row in connection.execute(
+    for row in fetch_rows(
+      engine,
+      connection,
       """
       SELECT url, title, page_number, year, music_director, director, starring,
              lyricists, zip_links_json, track_count, updated_at
@@ -166,14 +189,16 @@ def main():
       "link_status",
       "updated_at",
     ]
-    for row in connection.execute(
+    for row in fetch_rows(
+      engine,
+      connection,
       """
       SELECT id, album_url, title, artist, singers, composer, movie, year, mood,
              song_page_url, source_url, image_url, audio_url, audio_128_url, audio_320_url,
              remote_audio_128_url, remote_audio_320_url, local_audio_128_url, local_audio_320_url,
              download_links_json, spotify_json, last_refreshed_at, link_status, updated_at
       FROM songs
-      ORDER BY year DESC, movie COLLATE NOCASE, title COLLATE NOCASE
+      ORDER BY year DESC, lower(movie), lower(title)
       """,
     ):
       write_insert(handle, "songs", song_columns, row)

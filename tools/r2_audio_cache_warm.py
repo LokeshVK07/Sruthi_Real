@@ -32,6 +32,11 @@ except Exception as exc:  # pragma: no cover - import guard for workflow clarity
         "Missing dependency curl_cffi. Install with: python -m pip install curl_cffi"
     ) from exc
 
+try:
+    import duckdb
+except Exception:  # pragma: no cover - DuckDB is only required for .duckdb catalogs.
+    duckdb = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE_ORIGIN = "https://www.masstamilan.dev"
@@ -183,6 +188,27 @@ def candidate_urls(song: SongCandidate, prefer_bitrate: int) -> list[str]:
     return unique
 
 
+def is_duckdb_path(path: Path) -> bool:
+    return path.suffix.lower() in {".duckdb", ".ddb"}
+
+
+def open_catalog(path: Path):
+    if is_duckdb_path(path):
+        if duckdb is None:
+            raise SystemExit("DuckDB catalog requested, but duckdb is not installed. Install with: python -m pip install duckdb")
+        return "duckdb", duckdb.connect(str(path), read_only=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return "sqlite", conn
+
+
+def rows_as_dicts(engine: str, cursor) -> list[dict]:
+    if engine == "duckdb":
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return [dict(row) for row in cursor.fetchall()]
+
+
 def download_audio(song: SongCandidate, destination: Path, args: argparse.Namespace) -> tuple[bool, str]:
     urls = candidate_urls(song, args.prefer_bitrate)
     last_reason = "no-url"
@@ -235,9 +261,10 @@ def download_audio(song: SongCandidate, destination: Path, args: argparse.Namesp
 
 
 def load_candidates(args: argparse.Namespace) -> list[SongCandidate]:
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
-    filters = ["coalesce(audio_128_url, audio_320_url, remote_audio_128_url, remote_audio_320_url, '') != ''"]
+    engine, conn = open_catalog(args.db)
+    audio_128_expr = "coalesce(nullif(audio_128_url, ''), nullif(remote_audio_128_url, ''), nullif(audio_url, ''), '')"
+    audio_320_expr = "coalesce(nullif(audio_320_url, ''), nullif(remote_audio_320_url, ''), nullif(audio_url, ''), '')"
+    filters = [f"({audio_128_expr} != '' OR {audio_320_expr} != '')"]
     params: list[object] = []
     if args.ids:
         ids = [item.strip() for value in args.ids for item in value.split(",") if item.strip()]
@@ -256,33 +283,37 @@ def load_candidates(args: argparse.Namespace) -> list[SongCandidate]:
         "classic": "CASE WHEN year BETWEEN 1950 AND 2000 THEN 0 ELSE 1 END, year DESC, lower(title)",
         "title": "lower(title)",
     }[args.order]
-    rows = conn.execute(
-        f"""
-        SELECT id, title, artist, movie, album_url,
-               coalesce(audio_128_url, remote_audio_128_url, audio_url, '') AS audio_128_url,
-               coalesce(audio_320_url, remote_audio_320_url, audio_url, '') AS audio_320_url,
-               link_status, updated_at
-        FROM songs
-        WHERE {' AND '.join(filters)}
-        ORDER BY {order}
-        LIMIT ?
-        """,
-        [*params, args.scan_limit],
-    ).fetchall()
-    return [
-        SongCandidate(
-            id=clean_text(row["id"]),
-            title=clean_text(row["title"]),
-            artist=clean_text(row["artist"]),
-            movie=clean_text(row["movie"]),
-            album_url=clean_text(row["album_url"]),
-            audio_128_url=clean_text(row["audio_128_url"]),
-            audio_320_url=clean_text(row["audio_320_url"]),
-            link_status=clean_text(row["link_status"]),
-            updated_at=clean_text(row["updated_at"]),
+    try:
+        cursor = conn.execute(
+            f"""
+            SELECT id, title, artist, movie, album_url,
+                   {audio_128_expr} AS audio_128_url,
+                   {audio_320_expr} AS audio_320_url,
+                   link_status, updated_at
+            FROM songs
+            WHERE {' AND '.join(filters)}
+            ORDER BY {order}
+            LIMIT ?
+            """,
+            [*params, args.scan_limit],
         )
-        for row in rows
-    ]
+        rows = rows_as_dicts(engine, cursor)
+        return [
+            SongCandidate(
+                id=clean_text(row["id"]),
+                title=clean_text(row["title"]),
+                artist=clean_text(row["artist"]),
+                movie=clean_text(row["movie"]),
+                album_url=clean_text(row["album_url"]),
+                audio_128_url=clean_text(row["audio_128_url"]),
+                audio_320_url=clean_text(row["audio_320_url"]),
+                link_status=clean_text(row["link_status"]),
+                updated_at=clean_text(row["updated_at"]),
+            )
+            for row in rows
+        ]
+    finally:
+        conn.close()
 
 
 def status_api_cached(song_id: str, status_api: str, timeout: float) -> bool:
