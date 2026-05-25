@@ -8,11 +8,47 @@ on:
         required: false
         default: false
         type: boolean
+      workers:
+        description: Scraper workers
+        required: false
+        default: "4"
+      batch_size:
+        description: Albums per scraper batch
+        required: false
+        default: "16"
+      page_delay:
+        description: Delay between listing/index requests in seconds
+        required: false
+        default: "1"
+      album_delay:
+        description: Delay between album detail requests in seconds
+        required: false
+        default: "1"
+      retry_count:
+        description: Album/page retry count
+        required: false
+        default: "5"
+      retry_base_delay:
+        description: Base retry delay in seconds
+        required: false
+        default: "8"
+      stop_after_known_pages:
+        description: Stop listing crawl after this many known pages
+        required: false
+        default: "4"
+      movie_index_stop_after_known_pages:
+        description: Stop movie-index crawl after this many known pages
+        required: false
+        default: "45"
+      publish_ref:
+        description: Git ref used in raw manifest URLs and push target
+        required: false
+        default: "main"
   schedule:
     - cron: "17 */12 * * *"
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 concurrency:
@@ -27,6 +63,7 @@ jobs:
   refresh-and-deploy:
     name: Refresh and Deploy Tamil
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       GH_VARIABLES_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
@@ -43,9 +80,35 @@ jobs:
       RELEASE_MANIFEST: cloudflare/.generated/release-manifest.json
       RELEASE_DUCKDB: cloudflare/.generated/release-check.duckdb
       CATALOG_DUCKDB: data/sruthi.duckdb
+      LIBRARY_MANIFEST: cloudflare/data/library-manifest.json
+      LIBRARY_RELEASE_TAG: sruthi-library
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.publish_ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Define retry helper
+        run: |
+          cat > /tmp/retry.sh <<'EOF'
+          retry() {
+            local attempts="$1"
+            local sleep_seconds="$2"
+            shift 2
+            local n=1
+            while true; do
+              "$@" && break
+              if [ "$n" -ge "$attempts" ]; then
+                echo "Command failed after $n attempt(s): $*"
+                return 1
+              fi
+              echo "Attempt $n failed. Retrying in ${sleep_seconds}s: $*"
+              sleep "$sleep_seconds"
+              n=$((n + 1))
+            done
+          }
+          EOF
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -59,9 +122,10 @@ jobs:
 
       - name: Install workflow dependencies
         run: |
+          source /tmp/retry.sh
           python -m pip install --upgrade pip
-          python -m pip install duckdb requests beautifulsoup4 cloudscraper curl_cffi
-          npm install --global wrangler@4.81.1
+          retry 3 30 python -m pip install duckdb requests beautifulsoup4 cloudscraper curl_cffi boto3
+          retry 3 30 npm install --global wrangler@4.81.1
 
       - name: Validate workflow configuration
         run: |
@@ -109,9 +173,11 @@ jobs:
             "cloudflare/scripts/render_wrangler_config.py"
             "cloudflare/scripts/prepare_release.py"
             "cloudflare/scripts/export_d1_sql.py"
+            "cloudflare/data/library-manifest.json"
             "cloudflare/data/release-baseline.json"
             "tools/masstamilan_refresh.py"
             "tools/sqlite_to_duckdb.py"
+            "tools/publish_duckdb_library.py"
             "tools/r2_audio_cache_warm.py"
             "tools/stream_relay.py"
             "server.py"
@@ -136,7 +202,7 @@ jobs:
             exit 1
           fi
 
-          python -m py_compile tools/sqlite_to_duckdb.py tools/r2_audio_cache_warm.py tools/stream_relay.py
+          python -m py_compile tools/sqlite_to_duckdb.py tools/publish_duckdb_library.py tools/r2_audio_cache_warm.py tools/stream_relay.py
 
       - name: Resolve run mode
         run: |
@@ -149,8 +215,9 @@ jobs:
 
       - name: Verify Cloudflare token and account access
         run: |
+          source /tmp/retry.sh
           set -euo pipefail
-          if ! npx wrangler whoami >/tmp/wrangler-whoami.txt 2>/tmp/wrangler-whoami.err; then
+          if ! retry 3 20 npx wrangler whoami >/tmp/wrangler-whoami.txt 2>/tmp/wrangler-whoami.err; then
             echo "::error::Wrangler authentication check failed. Ensure CLOUDFLARE_API_TOKEN includes Workers, D1, and account membership access, and CLOUDFLARE_ACCOUNT_ID is correct."
             cat /tmp/wrangler-whoami.err
             exit 1
@@ -263,14 +330,14 @@ jobs:
       - name: Refresh catalog from MassTamilan
         run: |
           set -euo pipefail
-          workers="4"
-          batch_size="16"
-          page_delay="1"
-          album_delay="1"
-          retry_count="5"
-          retry_base_delay="8"
-          stop_after_known_pages="4"
-          movie_index_stop_after_known_pages="45"
+          workers="${{ inputs.workers || '4' }}"
+          batch_size="${{ inputs.batch_size || '16' }}"
+          page_delay="${{ inputs.page_delay || '1' }}"
+          album_delay="${{ inputs.album_delay || '1' }}"
+          retry_count="${{ inputs.retry_count || '5' }}"
+          retry_base_delay="${{ inputs.retry_base_delay || '8' }}"
+          stop_after_known_pages="${{ inputs.stop_after_known_pages || '4' }}"
+          movie_index_stop_after_known_pages="${{ inputs.movie_index_stop_after_known_pages || '45' }}"
           echo "Refresh configuration"
           echo "  mode = FULL PAGEWISE + MOVIE INDEX SOURCE CRAWL"
           echo "  workers = ${workers}"
@@ -346,6 +413,43 @@ jobs:
             exit 1
           fi
 
+      - name: Publish DuckDB library manifest
+        env:
+          INPUT_PUBLISH_REF: ${{ inputs.publish_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          version="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python tools/publish_duckdb_library.py \
+            --db-path "${CATALOG_DUCKDB}" \
+            --manifest "${LIBRARY_MANIFEST}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${INPUT_PUBLISH_REF}" \
+            --release-tag "${LIBRARY_RELEASE_TAG}" \
+            --version "${version}"
+
+          if [[ ! -f "${LIBRARY_MANIFEST}" ]]; then
+            echo "::error::DuckDB library manifest was not generated."
+            exit 1
+          fi
+
+      - name: Publish DuckDB library release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source /tmp/retry.sh
+          set -euo pipefail
+          if ! gh release view "${LIBRARY_RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            retry 3 20 gh release create "${LIBRARY_RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Sruthi DuckDB Library" \
+              --notes "Latest generated Sruthi DuckDB catalog for Python relay/backend usage." \
+              --latest=false
+          fi
+          retry 3 30 gh release upload "${LIBRARY_RELEASE_TAG}" \
+            "${CATALOG_DUCKDB}#sruthi.duckdb" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -355,29 +459,24 @@ jobs:
             cloudflare/data/seed.sql
             ${{ env.RELEASE_MANIFEST }}
             ${{ env.CATALOG_DUCKDB }}
+            ${{ env.LIBRARY_MANIFEST }}
             cloudflare/.generated/catalog-duckdb-manifest.json
 
       - name: Import release into inactive D1 slot
         run: |
+          source /tmp/retry.sh
           set -euo pipefail
-          npx wrangler d1 execute "${TARGET_DB_NAME}" \
+          retry 3 45 npx wrangler d1 execute "${TARGET_DB_NAME}" \
             --remote \
             --file cloudflare/data/seed.sql \
             --config "${GENERATED_WRANGLER_CONFIG}"
 
       - name: Validate inactive D1 slot
         run: |
+          source /tmp/retry.sh
           set -euo pipefail
-          npx wrangler d1 execute "${TARGET_DB_NAME}" \
-            --remote \
-            --command "SELECT COUNT(*) AS count FROM albums;" \
-            --config "${GENERATED_WRANGLER_CONFIG}" \
-            --json > /tmp/albums.json
-          npx wrangler d1 execute "${TARGET_DB_NAME}" \
-            --remote \
-            --command "SELECT COUNT(*) AS count FROM songs;" \
-            --config "${GENERATED_WRANGLER_CONFIG}" \
-            --json > /tmp/songs.json
+          retry 3 30 bash -c 'npx wrangler d1 execute "$1" --remote --command "SELECT COUNT(*) AS count FROM albums;" --config "$2" --json > /tmp/albums.json' _ "${TARGET_DB_NAME}" "${GENERATED_WRANGLER_CONFIG}"
+          retry 3 30 bash -c 'npx wrangler d1 execute "$1" --remote --command "SELECT COUNT(*) AS count FROM songs;" --config "$2" --json > /tmp/songs.json' _ "${TARGET_DB_NAME}" "${GENERATED_WRANGLER_CONFIG}"
           python - <<'PY'
           import json
           from pathlib import Path
@@ -404,8 +503,9 @@ jobs:
 
       - name: Deploy Worker after successful import and validation
         run: |
+          source /tmp/retry.sh
           set -euo pipefail
-          npx wrangler deploy --config "${GENERATED_WRANGLER_CONFIG}"
+          retry 3 45 npx wrangler deploy --config "${GENERATED_WRANGLER_CONFIG}"
 
       - name: Configure optional Python stream relay secret
         if: ${{ env.SRUTHI_PYTHON_STREAM_ORIGIN != '' && env.SRUTHI_PYTHON_STREAM_RELAY_TOKEN != '' }}
@@ -415,8 +515,9 @@ jobs:
 
       - name: Warm R2 audio cache for fastest playback
         run: |
+          source /tmp/retry.sh
           set -euo pipefail
-          python tools/r2_audio_cache_warm.py \
+          retry 2 60 python tools/r2_audio_cache_warm.py \
             --db "${CATALOG_DUCKDB}" \
             --bucket sruthi-audio-cache \
             --wrangler-config "${GENERATED_WRANGLER_CONFIG}" \
@@ -476,4 +577,38 @@ jobs:
 
           echo "::error::Failed to update SRUTHI_ACTIVE_D1_SLOT."
           cat /tmp/slot-patch.err
+          exit 1
+
+      - name: Commit refreshed DuckDB library manifest
+        env:
+          PUBLISH_REF: ${{ inputs.publish_ref || 'main' }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- "${LIBRARY_MANIFEST}"; then
+            echo "DuckDB library manifest unchanged; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${LIBRARY_MANIFEST}"
+          git commit -m "chore(data): refresh DuckDB library manifest"
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${PUBLISH_REF}"; then
+              echo "Pushed DuckDB library manifest on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected on attempt ${attempt}; rebasing on origin/${PUBLISH_REF}."
+            git fetch origin "${PUBLISH_REF}"
+            if ! git rebase "origin/${PUBLISH_REF}"; then
+              git rebase --abort || true
+              echo "::error::Could not rebase manifest commit onto origin/${PUBLISH_REF}."
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "::error::Failed to push DuckDB library manifest after 5 attempts."
           exit 1

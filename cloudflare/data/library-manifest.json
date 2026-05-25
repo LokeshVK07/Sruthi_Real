@@ -1,0 +1,21 @@
+{
+  "albumCount": 4806,
+  "databaseBytes": 23867392,
+  "databaseFile": "sruthi.duckdb",
+  "distinctMovieCount": 4732,
+  "downloadLinkCount": 55934,
+  "downloadUrl": "https://github.com/LokeshVK07/Sruthi_Real/releases/download/sruthi-library/sruthi.duckdb",
+  "download_url": "https://github.com/LokeshVK07/Sruthi_Real/releases/download/sruthi-library/sruthi.duckdb",
+  "latestSongUpdatedAt": "2026-05-18T12:52:50.250916+00:00",
+  "manifestUrl": "https://raw.githubusercontent.com/LokeshVK07/Sruthi_Real/main/cloudflare/data/library-manifest.json",
+  "manifest_url": "https://raw.githubusercontent.com/LokeshVK07/Sruthi_Real/main/cloudflare/data/library-manifest.json",
+  "name": "Sruthi DuckDB Library",
+  "playableSongCount": 27967,
+  "ref": "main",
+  "releaseTag": "sruthi-library",
+  "repo": "LokeshVK07/Sruthi_Real",
+  "sha256": "70940c7ecf987f7b37d9b4299e9672c3e47d6623bb18628ddca4c59966cdc507",
+  "songCount": 27972,
+  "updatedAt": "2026-05-22T00:00:00Z",
+  "version": "2026-05-22T00:00:00Z"
+}
